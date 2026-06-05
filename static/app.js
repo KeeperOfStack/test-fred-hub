@@ -788,7 +788,11 @@ function renderPlugins(list, updateInfo = {}) {
 }
 
 async function refreshPlugins() {
-  $("plugins-list").innerHTML = '<div class="empty">Loading plugins…</div>';
+  const root = $("plugins-list");
+  // Only flash "Loading…" when empty. Otherwise re-render in place.
+  if (!root.querySelector(".plugin")) {
+    root.innerHTML = '<div class="empty">Loading plugins…</div>';
+  }
   try {
     const r = await api("/api/plugins");
     const updateInfo = Object.fromEntries(pluginCache.map((x) => [x.file, x]));
@@ -925,118 +929,157 @@ async function uploadPlugin(file) {
 }
 
 // ── Catalog ─────────────────────────────────────────────────────
-async function refreshRegistry() {
-  $("registry-list").innerHTML = '<div class="empty">Loading catalog…</div>';
+async function refreshRegistry({ force = false } = {}) {
+  const root = $("registry-list");
+  // Only show the spinner when the list is empty (first load / explicit refresh).
+  // Otherwise leave the existing cards in place so the user doesn't see a flash.
+  const isEmpty = !root.querySelector(".reg-item");
+  if (isEmpty) root.innerHTML = '<div class="empty">Loading catalog…</div>';
   try {
-    const r = await api("/api/registry");
-    const root = $("registry-list");
-    const items = r.items || [];
-    const premium = r.premium || [];
-    if (!items.length && !premium.length) { root.innerHTML = '<div class="empty">Catalog is empty.</div>'; return; }
-    root.innerHTML = "";
-    for (const item of items) {
-      const card = document.createElement("div");
-      card.className = "reg-item" + (item.installed ? " reg-installed" : "");
-      const sources = item.sources.length
-        ? item.sources.map((s) => `<span class="source ${s.source}">${s.source}</span>`).join(" ")
-        : `<span class="source" style="background:#52525b">no sources</span>`;
-      const installAction = item.installed
-        ? `<span class="installed-tag">✓ installed</span>`
-        : (item.sources.length
-          ? `<button class="mc-btn" data-action="install" data-key="${item.key}">＋ Install</button>`
-          : `<span class="installed-tag" style="background:#3f3f46;color:#a1a1aa" title="Add at least one source to enable auto-install">no source</span>`);
-      const editBtn = `<button class="mc-btn catalog-edit-btn" data-key="${item.key}" data-display="${item.display}" data-sources='${JSON.stringify(item.sources).replace(/'/g, "&#39;")}'>✎ Edit</button>`;
-      const removeBtn = `<button class="mc-btn catalog-remove-btn" data-key="${item.key}" data-display="${item.display}">✕</button>`;
-      card.innerHTML = `
-        <div class="reg-icon">🌿</div>
-        <div class="reg-body">
-          <h3>${item.display} <span style="opacity:0.5;font-size:11px;font-weight:normal">(${item.key})</span></h3>
-          <div class="reg-sources">${sources}</div>
-        </div>
-        <div class="reg-action">
-          ${installAction}
-          ${editBtn}
-          ${removeBtn}
-        </div>`;
-      root.appendChild(card);
-    }
-    // Premium-only plugins — show them so users know we know they exist,
-    // but make the manual-upload path obvious.
-    if (premium.length) {
-      const sep = document.createElement("h3");
-      sep.className = "sub-h";
-      sep.style.cssText = "grid-column:1/-1;margin-top:18px;color:#fbbf24";
-      sep.textContent = "💎 Premium Plugins (manual upload)";
-      root.appendChild(sep);
-    }
-    for (const p of premium) {
-      const card = document.createElement("div");
-      card.className = "reg-item reg-premium";
-      card.dataset.spigotId = p.spigot_id;
-      // Version status: installed_version + latest.version, fold into a badge.
-      const lv = p.latest?.version || null;
-      const iv = p.installed_version || null;
-      let versionLine = "";
-      if (lv && iv) {
-        if (p.update_available) {
-          versionLine = `<span style="color:#f5b400">⬆ Update: <b>${iv}</b> → <b>${lv}</b></span>`;
-        } else {
-          versionLine = `<span style="color:#4ade80">✓ Up-to-date (v${iv})</span>`;
-        }
-      } else if (iv) {
-        versionLine = `<span style="opacity:0.8">Installed: v${iv} · latest unknown</span>`;
-      } else if (lv) {
-        versionLine = `<span style="opacity:0.8">Not installed · latest: v${lv}</span>`;
-      } else {
-        versionLine = `<span style="opacity:0.6">Version unknown — Spiget lookup failed</span>`;
-      }
-      const releaseLine = p.latest?.release_date_utc
-        ? ` · <span style="opacity:0.6">released ${new Date(p.latest.release_date_utc * 1000).toISOString().slice(0,10)}</span>`
-        : "";
-      const userTag = p.user_added ? ` <span class="source spiget" style="background:#7c3aed">user-added</span>` : "";
-      const removeBtn = p.user_added
-        ? `<button class="mc-btn premium-remove-btn" style="background:linear-gradient(180deg,#dc2626 0%,#7f1d1d 100%);font-size:11px;padding:4px 8px" title="Remove from catalog">✕ Remove</button>`
-        : "";
-      card.innerHTML = `
-        <div class="reg-icon" title="premium">💎</div>
-        <div class="reg-body">
-          <h3>${p.display} <span class="source spiget">premium</span>${userTag}</h3>
-          <div class="reg-sources" style="opacity:0.8;font-size:12px;line-height:1.35">${p.note || ""}</div>
-          <div class="premium-status" style="margin-top:6px;font-size:12px">${versionLine}${releaseLine}</div>
-          <div class="premium-fallbacks" style="display:none;margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
-        </div>
-        <div class="reg-action">
-          <button class="mc-btn premium-try-btn" style="background:linear-gradient(180deg,#4ade80 0%,#16a34a 100%)">📁 Manual Upload</button>
-          <a href="${p.url}" target="_blank" rel="noopener" style="font-size:11px;opacity:0.7">↗ View on Spigot</a>
-          ${removeBtn}
-        </div>`;
-      card.querySelector(".premium-try-btn").addEventListener("click",
-        () => openManualUploadModal(p, card));
-      if (p.user_added) {
-        card.querySelector(".premium-remove-btn").addEventListener("click", async () => {
-          if (!(await confirmModal({
-            title: `Remove ${p.display} from catalog?`,
-            message: "Removes this premium plugin from your catalog. Already-installed jars are NOT touched.",
-            confirmText: "Remove", danger: true,
-          }))) return;
-          try {
-            await api(`/api/premium/${encodeURIComponent(p.spigot_id)}`, { method: "DELETE" });
-            toast(`${p.display} removed from catalog.`, "ok");
-            await refreshRegistry();
-          } catch (e) { toast(`Remove failed: ${e.message}`, "err"); }
-        });
-      }
-      root.appendChild(card);
-    }
+    // ?fast=1 → skip live Spiget calls, cache-only. Slow path runs only on
+    // explicit refresh from the Refresh button.
+    const path = force ? "/api/registry" : "/api/registry?fast=1";
+    const r = await api(path);
+    _lastRegistry = r;
+    renderRegistry(r);
   } catch (e) { toast("Catalog load failed: " + e.message, "err"); }
+}
+
+// Snapshot of the last /api/registry response. Used so install/cancel can
+// patch a single card without round-tripping the whole list.
+let _lastRegistry = null;
+
+function renderRegistry(r) {
+  const root = $("registry-list");
+  const items = r.items || [];
+  const premium = r.premium || [];
+  if (!items.length && !premium.length) {
+    root.innerHTML = '<div class="empty">Catalog is empty.</div>';
+    return;
+  }
+  root.innerHTML = "";
+  for (const item of items) {
+    root.appendChild(buildCatalogCard(item));
+  }
+  if (premium.length) {
+    const sep = document.createElement("h3");
+    sep.className = "sub-h";
+    sep.style.cssText = "grid-column:1/-1;margin-top:18px;color:#fbbf24";
+    sep.textContent = "💎 Premium Plugins (manual upload)";
+    root.appendChild(sep);
+  }
+  for (const p of premium) {
+    root.appendChild(buildPremiumCard(p));
+  }
+}
+
+// Surgical update — replace a single catalog card after install/cancel so the
+// user sees the new state instantly without re-fetching the whole catalog.
+function patchCatalogItem(key, mutator) {
+  if (!_lastRegistry) return;
+  const items = _lastRegistry.items || [];
+  const idx = items.findIndex((x) => x.key === key);
+  if (idx < 0) return;
+  mutator(items[idx]);
+  const oldCard = $("registry-list").querySelector(
+    `.reg-item [data-key="${CSS.escape(key)}"]`
+  )?.closest(".reg-item");
+  const newCard = buildCatalogCard(items[idx]);
+  if (oldCard && oldCard.parentNode) {
+    oldCard.parentNode.replaceChild(newCard, oldCard);
+  }
+}
+
+function buildCatalogCard(item) {
+  const card = document.createElement("div");
+  card.className = "reg-item" + (item.installed ? " reg-installed" : "");
+  const sources = item.sources.length
+    ? item.sources.map((s) => `<span class="source ${s.source}">${s.source}</span>`).join(" ")
+    : `<span class="source" style="background:#52525b">no sources</span>`;
+  const installAction = item.installed
+    ? `<span class="installed-tag">✓ installed</span>`
+    : (item.sources.length
+      ? `<button class="mc-btn" data-action="install" data-key="${item.key}">＋ Install</button>`
+      : `<span class="installed-tag" style="background:#3f3f46;color:#a1a1aa" title="Add at least one source to enable auto-install">no source</span>`);
+  const editBtn = `<button class="mc-btn catalog-edit-btn" data-key="${item.key}" data-display="${item.display}" data-sources='${JSON.stringify(item.sources).replace(/'/g, "&#39;")}'>✎ Edit</button>`;
+  const removeBtn = `<button class="mc-btn catalog-remove-btn" data-key="${item.key}" data-display="${item.display}">✕</button>`;
+  card.innerHTML = `
+    <div class="reg-icon">🌿</div>
+    <div class="reg-body">
+      <h3>${item.display} <span style="opacity:0.5;font-size:11px;font-weight:normal">(${item.key})</span></h3>
+      <div class="reg-sources">${sources}</div>
+    </div>
+    <div class="reg-action">
+      ${installAction}
+      ${editBtn}
+      ${removeBtn}
+    </div>`;
+  return card;
+}
+
+function buildPremiumCard(p) {
+  const card = document.createElement("div");
+  card.className = "reg-item reg-premium";
+  card.dataset.spigotId = p.spigot_id;
+  const lv = p.latest?.version || null;
+  const iv = p.installed_version || null;
+  let versionLine = "";
+  if (lv && iv) {
+    if (p.update_available) {
+      versionLine = `<span style="color:#f5b400">⬆ Update: <b>${iv}</b> → <b>${lv}</b></span>`;
+    } else {
+      versionLine = `<span style="color:#4ade80">✓ Up-to-date (v${iv})</span>`;
+    }
+  } else if (iv) {
+    versionLine = `<span style="opacity:0.8">Installed: v${iv} · latest unknown</span>`;
+  } else if (lv) {
+    versionLine = `<span style="opacity:0.8">Not installed · latest: v${lv}</span>`;
+  } else {
+    versionLine = `<span style="opacity:0.6">Version unknown — Spiget lookup failed</span>`;
+  }
+  const releaseLine = p.latest?.release_date_utc
+    ? ` · <span style="opacity:0.6">released ${new Date(p.latest.release_date_utc * 1000).toISOString().slice(0,10)}</span>`
+    : "";
+  const userTag = p.user_added ? ` <span class="source spiget" style="background:#7c3aed">user-added</span>` : "";
+  const removeBtn = p.user_added
+    ? `<button class="mc-btn premium-remove-btn" style="background:linear-gradient(180deg,#dc2626 0%,#7f1d1d 100%);font-size:11px;padding:4px 8px" title="Remove from catalog">✕ Remove</button>`
+    : "";
+  card.innerHTML = `
+    <div class="reg-icon" title="premium">💎</div>
+    <div class="reg-body">
+      <h3>${p.display} <span class="source spiget">premium</span>${userTag}</h3>
+      <div class="reg-sources" style="opacity:0.8;font-size:12px;line-height:1.35">${p.note || ""}</div>
+      <div class="premium-status" style="margin-top:6px;font-size:12px">${versionLine}${releaseLine}</div>
+      <div class="premium-fallbacks" style="display:none;margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+    <div class="reg-action">
+      <button class="mc-btn premium-try-btn" style="background:linear-gradient(180deg,#4ade80 0%,#16a34a 100%)">📁 Manual Upload</button>
+      <a href="${p.url}" target="_blank" rel="noopener" style="font-size:11px;opacity:0.7">↗ View on Spigot</a>
+      ${removeBtn}
+    </div>`;
+  card.querySelector(".premium-try-btn").addEventListener("click",
+    () => openManualUploadModal(p, card));
+  if (p.user_added) {
+    card.querySelector(".premium-remove-btn").addEventListener("click", async () => {
+      if (!(await confirmModal({
+        title: `Remove ${p.display} from catalog?`,
+        message: "Removes this premium plugin from your catalog. Already-installed jars are NOT touched.",
+        confirmText: "Remove", danger: true,
+      }))) return;
+      try {
+        await api(`/api/premium/${encodeURIComponent(p.spigot_id)}`, { method: "DELETE" });
+        toast(`${p.display} removed from catalog.`, "ok");
+        await refreshRegistry();
+      } catch (e) { toast(`Remove failed: ${e.message}`, "err"); }
+    });
+  }
+  return card;
 }
 
 async function installFromCatalog(key, btn, intent) {
   busy(btn, true, "Staging…");
   const noun = (btn?.closest(".reg-item")?.querySelector("h3")?.textContent || key).trim();
-  const modal = openSchedulerPickerAfterStaging({ noun, file: null, pending: true });
-  // Safety net: if the backend hangs or the resolve path silently fails,
-  // never leave the user staring at a grayed-out modal. Auto-close + toast.
+  const modal = openSchedulerPickerAfterStaging({ noun, file: null, pending: true, catalogKey: key });
   const timeoutId = setTimeout(() => {
     if (document.body.contains(modal.modal)) {
       toast("Install request timed out — closing modal. Check the Plugins tab.", "warn");
@@ -1049,7 +1092,8 @@ async function installFromCatalog(key, btn, intent) {
     clearTimeout(timeoutId);
     const mode = r.staged ? "Staged" : "Installed";
     toast(`${mode} ${r.file} (${r.source} v${r.version}).`, "ok");
-    // Refresh AFTER resolving the modal so the visual state lands first.
+    // Surgically mark this catalog item as installed — no full re-fetch.
+    patchCatalogItem(key, (it) => { it.installed = true; });
     if (intent && intent.trigger !== "none") {
       intent.note = `${key} install`;
       await submitRestartIntent(intent);
@@ -1057,7 +1101,6 @@ async function installFromCatalog(key, btn, intent) {
     } else {
       modal.resolve({ noun: r.file.replace(/\.jar$/, ""), file: r.file, staged: !!r.staged });
     }
-    refreshRegistry(); refreshPlugins(); refreshServer(); refreshSchedule();
   } catch (e) {
     clearTimeout(timeoutId);
     toast("Install failed: " + e.message, "err");
@@ -1379,7 +1422,8 @@ async function installFromSearch(source, ref, title, btn) {
     const mode = r.staged ? "Staged" : "Installed";
     toast(`${mode} ${r.file} (${r.source} v${r.version}).`, "ok");
     modal.resolve({ noun: title, file: r.file, staged: !!r.staged });
-    refreshPlugins(); refreshRegistry(); refreshServer(); refreshSchedule();
+    // Just refresh the plugins list — search results don't need re-fetching.
+    refreshPlugins();
   } catch (e) {
     clearTimeout(timeoutId);
     toast("Install failed: " + e.message, "err");
@@ -1400,7 +1444,7 @@ async function installFromSearch(source, ref, title, btn) {
 //                                              // staged=false → jar in plugins/ (fresh install)
 //
 // Returns { close(), resolve({noun,file,staged}), modal }.
-function openSchedulerPickerAfterStaging({ noun, file, staged = true, pending = false }) {
+function openSchedulerPickerAfterStaging({ noun, file, staged = true, pending = false, catalogKey = null }) {
   const showScope = !!(lastServer && lastServer.pending_restart);
   const picker = buildRestartPicker({
     showScope,
@@ -1424,11 +1468,10 @@ function openSchedulerPickerAfterStaging({ noun, file, staged = true, pending = 
   document.body.appendChild(modal);
   modal.querySelector("#rp-mount").appendChild(picker.node);
 
-  // Store state on the modal node so the click handlers always read fresh values
-  // after .resolve() updates them.
   modal.dataset.noun = noun;
   if (file) modal.dataset.file = file;
   modal.dataset.staged = String(staged);
+  if (catalogKey) modal.dataset.catalogKey = catalogKey;
 
   const close = () => modal.remove();
 
@@ -1436,19 +1479,25 @@ function openSchedulerPickerAfterStaging({ noun, file, staged = true, pending = 
     const fileNow = modal.dataset.file;
     const stagedNow = modal.dataset.staged === "true";
     const nounNow = modal.dataset.noun || noun;
+    const keyNow = modal.dataset.catalogKey || null;
     if (!fileNow) { close(); return; }
-    // Staged jars live in plugins/update/ → use the staged-install delete route.
-    // Fresh-install jars live in plugins/ → use the plugin delete route.
+    const cancelBtn = modal.querySelector("#rp-cancel");
+    cancelBtn.disabled = true;
+    cancelBtn.textContent = "Removing…";
     const url = stagedNow
       ? `/api/plugins/${encodeURIComponent(fileNow)}/staged-install`
-      : `/api/plugins/${encodeURIComponent(fileNow)}`;
+      : `/api/plugins/${encodeURIComponent(fileNow)}?immediate=true`;
     try {
+      // Block on the DELETE before any UI cleanup. The previous behavior fired
+      // refreshes BEFORE the response, which is why "cancelled" entries still
+      // showed installed — the cached registry response was already in flight.
       await api(url, { method: "DELETE" });
+      // Patch the catalog card back to uninstalled. No round-trip.
+      if (keyNow) patchCatalogItem(keyNow, (it) => { it.installed = false; });
       toast(`${nounNow} cancelled — jar removed.`, "ok");
     } catch (e) {
       toast(`Could not remove jar: ${e.message}`, "err");
     }
-    Promise.all([refreshPlugins(), refreshRegistry(), refreshServer(), refreshSchedule()]);
     close();
   });
 
@@ -1458,7 +1507,6 @@ function openSchedulerPickerAfterStaging({ noun, file, staged = true, pending = 
     const nounNow = modal.dataset.noun || noun;
     intent.note = `${nounNow} install`;
     if (intent.trigger === "none") {
-      // No restart scheduled — confirm just means "leave it in place".
       toast(`${nounNow} ready. Will load on next restart.`, "ok");
       close();
       return;
@@ -1467,7 +1515,6 @@ function openSchedulerPickerAfterStaging({ noun, file, staged = true, pending = 
     if (r) close();
   });
 
-  // Resolve: switch from pending to ready state with real filename / location.
   const resolve = ({ noun: realNoun, file: realFile, staged: realStaged }) => {
     modal.dataset.noun = realNoun;
     modal.dataset.file = realFile;
@@ -1484,7 +1531,6 @@ function openSchedulerPickerAfterStaging({ noun, file, staged = true, pending = 
     for (const b of modal.querySelectorAll("button")) b.disabled = false;
   };
 
-  // Non-pending caller already has everything — set initial sub-text now.
   if (!pending && file) {
     resolve({ noun, file, staged });
   }
@@ -2838,7 +2884,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   // Catalog
-  $("btn-registry-refresh").addEventListener("click", refreshRegistry);
+  $("btn-registry-refresh").addEventListener("click", () => refreshRegistry({ force: true }));
   $("btn-install-all").addEventListener("click", (e) => installAllMissing(e.currentTarget));
   $("btn-catalog-add").addEventListener("click", () => openCatalogEntryModal());
   $("btn-catalog-reset").addEventListener("click", async () => {

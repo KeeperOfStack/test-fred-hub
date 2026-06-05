@@ -191,8 +191,10 @@ async def _spiget_latest_version(client: "httpx.AsyncClient", spigot_id: str) ->
     if cached and (now - cached[0]) < _SPIGET_TTL:
         return cached[1]
     try:
-        res_r = await client.get(f"https://api.spiget.org/v2/resources/{sid}", timeout=8)
-        ver_r = await client.get(f"https://api.spiget.org/v2/resources/{sid}/versions/latest", timeout=8)
+        res_r, ver_r = await asyncio.gather(
+            client.get(f"https://api.spiget.org/v2/resources/{sid}", timeout=8),
+            client.get(f"https://api.spiget.org/v2/resources/{sid}/versions/latest", timeout=8),
+        )
         if res_r.status_code != 200 or ver_r.status_code != 200:
             return None
         res = res_r.json()
@@ -352,11 +354,26 @@ def _server_version_configured(rec: dict, paths: dict) -> tuple[str | None, str 
     return current.get("version"), (str(current["build"]) if current.get("build") else None)
 
 
+# Cache parsed plugin metadata so we don't reread + re-hash multi-MB jars
+# on every /api/registry or /api/plugins call. Key by (path, mtime, size) so
+# any change to the file invalidates the entry. Bounded by jar count.
+_PLUGIN_JAR_CACHE: dict[tuple[str, float, int], dict] = {}
+
+
 def _parse_plugin_jar(jar_path: Path) -> dict:
+    try:
+        st = jar_path.stat()
+    except Exception:
+        st = None
+    if st is not None:
+        cache_key = (str(jar_path), st.st_mtime, st.st_size)
+        cached = _PLUGIN_JAR_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
     info: dict = {
         "file": jar_path.name,
-        "size": jar_path.stat().st_size,
-        "mtime": jar_path.stat().st_mtime,
+        "size": st.st_size if st else 0,
+        "mtime": st.st_mtime if st else 0,
         "name": None, "version": None, "main": None, "api_version": None,
         "authors": [], "description": None, "website": None,
         "sha1": None, "sha512": None,
@@ -398,6 +415,8 @@ def _parse_plugin_jar(jar_path: Path) -> dict:
             if not info["name"] and deep["plugin_name"]:
                 info["name"] = deep["plugin_name"]
             info["version_source"] = deep["source"]
+    if st is not None:
+        _PLUGIN_JAR_CACHE[(str(jar_path), st.st_mtime, st.st_size)] = info
     return info
 
 
@@ -2092,7 +2111,13 @@ async def list_plugins() -> dict:
 
 
 @app.get("/api/registry")
-async def installable_registry() -> dict:
+async def installable_registry(fast: bool = False) -> dict:
+    """Return the per-server plugin catalog + premium-plugin list.
+
+    Set ``fast=true`` to skip live Spiget version lookups (use cached values
+    only). The UI passes fast=true on every refresh that follows a user
+    interaction; the slow path is reserved for the explicit Refresh button.
+    """
     rec = _srv()
     paths = _paths(rec)
     plugins_dir = paths["plugins"]
@@ -2136,15 +2161,29 @@ async def installable_registry() -> dict:
 
     # Attach live latest_version + installed_version for each premium entry.
     # Spiget cache keeps this cheap; failures degrade gracefully to None.
+    # In fast mode we skip live lookups entirely — only cached values are
+    # used, and a cache miss returns None. The user can force a slow refresh
+    # via the Refresh button (which omits fast=true).
     staged_mem = _load_json(_staged_path(rec["id"]), {})
+
+    async def _lookup_one(client, p):
+        sid = str(p.get("spigot_id") or "")
+        if not sid:
+            return None
+        if fast:
+            cached = _SPIGET_CACHE.get(sid)
+            return cached[1] if cached else None
+        return await _spiget_latest_version(client, sid)
+
     async with _client() as c:
-        for p in merged:
-            sid = str(p.get("spigot_id") or "")
-            latest = await _spiget_latest_version(c, sid) if sid else None
+        # Parallel fan-out — each merged entry's Spiget call runs concurrently.
+        latests = await asyncio.gather(*[_lookup_one(c, p) for p in merged])
+        for p, latest in zip(merged, latests):
             p["latest"] = latest  # {version, release_date_utc, ...} or None
             # Match installed jar by:
             #   1) staged-memory entry whose source mentions this spigot_id
             #   2) display-name prefix match (e.g. "[Official] mcMMO …" ↔ "mcMMO")
+            sid = str(p.get("spigot_id") or "")
             installed_info = None
             for fn, meta in staged_mem.items():
                 if str(meta.get("source", "")).endswith(f"-{sid}"):
