@@ -1304,7 +1304,6 @@ function renderSearchResults() {
       ? `<img class="search-hit-icon" src="${h.icon}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'search-hit-icon',textContent:'🧩'}))">`
       : `<div class="search-hit-icon">${h.premium ? "💎" : "🧩"}</div>`;
     const dl = h.downloads ? `<span class="dl-count">⬇ ${h.downloads.toLocaleString()}</span>` : "";
-    const link = h.url ? `<a href="${h.url}" target="_blank" rel="noopener" class="dl-count">↗ open</a>` : "";
     const premiumBadge = h.premium ? `<span class="badge-premium">💎 PREMIUM</span>` : "";
     const priceText = h.premium && h.price ? `<span class="dl-count">$${h.price}</span>` : "";
     // Premium hits: offer "+ Add to Catalog" (curates the plugin for periodic
@@ -1312,19 +1311,18 @@ function renderSearchResults() {
     // Both are needed — adding to catalog without uploading the jar doesn't
     // install anything; uploading without adding means no future update alerts.
     const actionBtn = h.premium
-      ? `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
-           <button class="mc-btn mc-btn-warn search-premium-add-btn"
-                   data-spigot-id="${h.ref}"
-                   data-title="${(h.title || "").replace(/"/g, "&quot;")}"
-                   data-url="${(h.url || "").replace(/"/g, "&quot;")}"
-                   data-icon="${(h.icon || "").replace(/"/g, "&quot;")}"
-                   title="Add this premium plugin to your catalog so the hub tracks new releases">＋ Add to Catalog</button>
-           <a href="${h.url || '#'}" target="_blank" rel="noopener" style="font-size:11px;opacity:0.7">↗ Buy on Spigot</a>
-         </div>`
-      : `<button class="mc-btn mc-btn-warn search-install-btn"
+      ? `<button class="mc-btn mc-btn-warn search-premium-add-btn"
+                 data-spigot-id="${h.ref}"
+                 data-title="${(h.title || "").replace(/"/g, "&quot;")}"
+                 data-url="${(h.url || "").replace(/"/g, "&quot;")}"
+                 data-icon="${(h.icon || "").replace(/"/g, "&quot;")}"
+                 title="Add this premium plugin to your catalog so the hub tracks new releases">＋ Add to Catalog</button>
+         ${h.url ? `<a href="${h.url}" target="_blank" rel="noopener">↗ Buy on Spigot</a>` : ""}`
+      : `<button class="mc-btn search-install-btn"
                 data-source="${h.source}"
                 data-ref="${h.ref}"
-                data-title="${(h.title || "").replace(/"/g, "&quot;")}">Install</button>`;
+                data-title="${(h.title || "").replace(/"/g, "&quot;")}">＋ Install</button>
+         ${h.url ? `<a href="${h.url}" target="_blank" rel="noopener">↗ View</a>` : ""}`;
     card.innerHTML = `
       ${iconHtml}
       <div class="search-hit-body">
@@ -1332,10 +1330,10 @@ function renderSearchResults() {
         <div class="search-hit-summary">${h.summary || ""}</div>
         <div class="search-hit-meta">
           <span class="source ${h.source}">${h.source}</span>
-          ${dl}${priceText}${link}
+          ${dl}${priceText}
         </div>
       </div>
-      <div>${actionBtn}</div>`;
+      <div class="search-hit-action">${actionBtn}</div>`;
     root.appendChild(card);
   }
 }
