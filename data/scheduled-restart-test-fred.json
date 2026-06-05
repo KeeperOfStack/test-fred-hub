@@ -1,0 +1,13 @@
+{
+  "trigger": "no_players",
+  "scope": "plugins",
+  "scheduled_utc": null,
+  "max_players": 0,
+  "created_at": 1780558774.582706,
+  "note": "LightItUp staged",
+  "status": "done",
+  "last_check": 1780562026.9134786,
+  "error": null,
+  "fired_at": 1780562026.9353852,
+  "waiting_for_players": false
+}

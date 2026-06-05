@@ -1,0 +1,204 @@
+{
+  "automatedcrafting": {
+    "display": "Automated Crafting",
+    "sources": [
+      [
+        "spiget",
+        "70432"
+      ]
+    ]
+  },
+  "chunky": {
+    "display": "Chunky",
+    "sources": [
+      [
+        "modrinth",
+        "chunky-pregenerator"
+      ],
+      [
+        "spiget",
+        "81534"
+      ]
+    ]
+  },
+  "chestsort": {
+    "display": "ChestSort + API",
+    "sources": [
+      [
+        "spiget",
+        "59773"
+      ]
+    ]
+  },
+  "coordinatesplus": {
+    "display": "CoordinatesPlus",
+    "sources": [
+      [
+        "spiget",
+        "80736"
+      ]
+    ]
+  },
+  "coreprotect": {
+    "display": "CoreProtect (Community Edition)",
+    "sources": [
+      [
+        "spiget",
+        "8631"
+      ]
+    ]
+  },
+  "discordsrv": {
+    "display": "DiscordSRV",
+    "sources": [
+      [
+        "spiget",
+        "18494"
+      ],
+      [
+        "modrinth",
+        "discordsrv"
+      ]
+    ]
+  },
+  "essentials": {
+    "display": "EssentialsX",
+    "sources": [
+      [
+        "modrinth",
+        "essentialsx"
+      ],
+      [
+        "spiget",
+        "9089"
+      ]
+    ]
+  },
+  "graves": {
+    "display": "GravesX",
+    "sources": [
+      [
+        "modrinth",
+        "gravesx"
+      ],
+      [
+        "spiget",
+        "118271"
+      ]
+    ]
+  },
+  "keepchunks": {
+    "display": "KeepChunks",
+    "sources": [
+      [
+        "spiget",
+        "23307"
+      ]
+    ]
+  },
+  "luckperms": {
+    "display": "LuckPerms",
+    "sources": [
+      [
+        "modrinth",
+        "luckperms"
+      ]
+    ]
+  },
+  "nochatreports": {
+    "display": "No Chat Reports",
+    "sources": [
+      [
+        "modrinth",
+        "no-chat-reports"
+      ],
+      [
+        "spiget",
+        "102931"
+      ]
+    ]
+  },
+  "viabackwards": {
+    "display": "ViaBackwards",
+    "sources": [
+      [
+        "hangar",
+        "ViaVersion/ViaBackwards"
+      ],
+      [
+        "modrinth",
+        "viabackwards"
+      ]
+    ]
+  },
+  "viaversion": {
+    "display": "ViaVersion",
+    "sources": [
+      [
+        "hangar",
+        "ViaVersion/ViaVersion"
+      ],
+      [
+        "modrinth",
+        "viaversion"
+      ]
+    ]
+  },
+  "bluemap": {
+    "display": "BlueMap",
+    "sources": [
+      [
+        "modrinth",
+        "bluemap"
+      ],
+      [
+        "spiget",
+        "83557"
+      ]
+    ]
+  },
+  "easywhitelist": {
+    "display": "EasyWhitelist (name-based)",
+    "sources": [
+      [
+        "spiget",
+        "65222"
+      ]
+    ]
+  },
+  "geyser-spigot": {
+    "display": "Geyser",
+    "sources": [
+      [
+        "geyser",
+        "geyser"
+      ],
+      [
+        "modrinth",
+        "geyser"
+      ]
+    ]
+  },
+  "floodgate": {
+    "display": "Floodgate",
+    "sources": [
+      [
+        "geyser",
+        "floodgate"
+      ],
+      [
+        "modrinth",
+        "floodgate"
+      ]
+    ]
+  },
+  "openinv": {
+    "display": "OpenInv",
+    "sources": [
+      [
+        "modrinth",
+        "openinv"
+      ]
+    ]
+  }
+}

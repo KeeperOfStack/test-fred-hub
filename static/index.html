@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Test Fred Launcher</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css?v=10" />
+</head>
+<body>
+  <div class="launcher">
+
+    <!-- ── Sidebar ─────────────────────────────────────────── -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-cube"></span>
+        <div>
+          <div class="brand-name">TEST FRED</div>
+          <div class="brand-sub">SERVER HUB</div>
+        </div>
+      </div>
+
+      <div class="server-switcher">
+        <label class="server-switcher-label">SERVER</label>
+        <div class="server-switcher-row">
+          <select id="server-select"></select>
+          <button class="mc-btn mc-btn-sm" id="btn-server-add" title="Add server">＋</button>
+          <button class="mc-btn mc-btn-sm mc-btn-danger" id="btn-server-remove" title="Stop tracking">−</button>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-btn active" data-tab="play">
+          <span class="nav-ico">▶</span><span>Play</span>
+        </button>
+        <button class="nav-btn" data-tab="server">
+          <span class="nav-ico">⚙</span><span>Server</span>
+        </button>
+        <button class="nav-btn" data-tab="plugins">
+          <span class="nav-ico">🧩</span><span>Plugins</span>
+          <span class="nav-badge" id="nav-plugins-badge" hidden>0</span>
+        </button>
+        <button class="nav-btn" data-tab="catalog">
+          <span class="nav-ico">🌿</span><span>Catalog</span>
+        </button>
+        <button class="nav-btn" data-tab="search">
+          <span class="nav-ico">🔍</span><span>Search</span>
+        </button>
+        <button class="nav-btn" data-tab="updates">
+          <span class="nav-ico">📦</span><span>Updates</span>
+          <span class="nav-badge gold" id="nav-updates-badge" hidden>0</span>
+        </button>
+        <button class="nav-btn" data-tab="console">
+          <span class="nav-ico">📜</span><span>Console</span>
+        </button>
+        <button class="nav-btn" data-tab="about">
+          <span class="nav-ico">ⓘ</span><span>About</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div id="server-pill" class="pill pill-loading">checking…</div>
+        <div class="version">v0.3 · Paper <span id="foot-version">?</span></div>
+      </div>
+    </aside>
+
+    <!-- ── Main content ────────────────────────────────────── -->
+    <main class="content">
+
+      <!-- PLAY TAB -->
+      <section class="tab tab-play active" data-tab="play">
+        <div class="hero">
+          <div class="hero-bg"></div>
+          <div class="hero-overlay"></div>
+          <div class="hero-inner">
+            <div class="motd-block">
+              <div class="motd-label">MESSAGE OF THE DAY</div>
+              <h1 class="motd" id="hero-motd">—</h1>
+            </div>
+
+            <div class="connect-card">
+              <div class="connect-line">
+                <label>SERVER ADDRESS</label>
+                <div class="connect-addr">
+                  <code id="connect-addr">—</code>
+                  <button class="mc-btn mc-btn-sm" id="btn-copy-addr" title="Copy">⧉ Copy</button>
+                </div>
+              </div>
+              <div class="connect-stats">
+                <div><label>STATUS</label><span id="hero-status">—</span></div>
+                <div><label>PLAYERS</label><span id="hero-players">—</span></div>
+                <div><label>VERSION</label><span id="hero-version">—</span></div>
+                <div><label>PING</label><span id="hero-ping">—</span></div>
+              </div>
+              <div id="player-names" class="player-names"></div>
+            </div>
+
+            <div class="play-controls">
+              <button class="mc-btn-play" id="btn-restart"><span>RESTART SERVER</span></button>
+              <button class="mc-btn mc-btn-warn" id="btn-start">Start</button>
+              <button class="mc-btn mc-btn-danger" id="btn-stop">Stop</button>
+              <button class="mc-btn" id="btn-refresh">↻ Refresh</button>
+            </div>
+            <div class="hint" id="server-hint"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PLUGINS TAB -->
+      <section class="tab tab-plugins" data-tab="plugins">
+        <div class="tab-head">
+          <h2>🧩 Installed Plugins</h2>
+          <div class="tab-actions">
+            <button class="mc-btn" id="btn-plugins-refresh">↻ Refresh</button>
+            <button class="mc-btn" id="btn-plugins-check">Check All for Updates</button>
+            <button class="mc-btn mc-btn-warn" id="btn-plugins-stage-all">Stage All Updates</button>
+            <label class="mc-btn mc-btn-upload">
+              ＋ Upload .jar
+              <input type="file" id="upload-input" accept=".jar" hidden>
+            </label>
+          </div>
+        </div>
+        <div id="plugins-list" class="plugins-list">
+          <div class="empty">Loading plugins…</div>
+        </div>
+      </section>
+
+      <!-- CATALOG TAB -->
+      <section class="tab tab-catalog" data-tab="catalog">
+        <div class="tab-head">
+          <h2>🌿 Plugin Catalog</h2>
+          <div class="tab-actions">
+            <button class="mc-btn" id="btn-registry-refresh">↻ Refresh</button>
+            <button class="mc-btn mc-btn-warn" id="btn-catalog-add">＋ Add Entry</button>
+            <button class="mc-btn mc-btn-warn" id="btn-install-all">Install All Missing</button>
+            <button class="mc-btn" id="btn-catalog-reset" title="Reset this server's catalog to the built-in defaults" style="background:linear-gradient(180deg,#6b7280 0%,#374151 100%)">↺ Reset to Defaults</button>
+          </div>
+        </div>
+        <p class="hint">Curated plugin list with multi-source fallback. Sources tried in order until one yields a real jar.</p>
+
+        <h3 class="sub-h">Plugins</h3>
+        <div id="registry-list" class="registry-list">
+          <div class="empty">Loading catalog…</div>
+        </div>
+      </section>
+
+      <!-- SEARCH TAB -->
+      <section class="tab tab-search" data-tab="search">
+        <div class="tab-head">
+          <h2>🔍 Search Plugins</h2>
+        </div>
+        <div class="search-bar">
+          <input type="text" id="search-input" placeholder="Search Modrinth · Hangar · Spiget — try 'essentials', 'worldguard', 'dynmap'…" />
+          <button class="mc-btn" id="search-btn">Search</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin:6px 0 4px;font-size:12px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="search-premium-only" style="width:auto">
+            <span>💎 Show premium-only results</span>
+          </label>
+          <span style="opacity:0.6">— premium plugins can't be auto-downloaded but you can <b>add them to your catalog</b> for version tracking.</span>
+        </div>
+        <p class="hint">Concurrent search across all upstreams. Default view hides premium-locked Spigot resources unless the toggle above is on.</p>
+        <div id="search-results" class="search-results">
+          <div class="empty">Type a query and hit Search.</div>
+        </div>
+      </section>
+
+      <!-- SERVER (config) TAB -->
+      <section class="tab tab-server" data-tab="server">
+        <div class="tab-head">
+          <h2>⚙ Server Configuration</h2>
+          <div class="tab-actions">
+            <button class="mc-btn" id="btn-config-reload">↻ Reload</button>
+            <button class="mc-btn mc-btn-warn" id="btn-recreate">⟲ Recreate Container</button>
+          </div>
+        </div>
+        <p class="hint">Edits the compose file at <code id="compose-path">—</code>. Changes are written immediately but only take effect on container recreate.</p>
+
+        <!-- Type picker is always present -->
+        <div class="config-grid config-grid-top">
+          <label class="config-field config-field-wide">
+            <span>Server Type</span>
+            <select id="cfg-type"></select>
+            <small id="type-desc" class="field-desc"></small>
+            <small id="type-notes" class="field-notes" hidden></small>
+          </label>
+          <label class="config-field config-field-wide">
+            <span>Java Runtime (auto)</span>
+            <div id="cfg-java-display" class="java-runtime-card">
+              <span class="java-runtime-tag" id="cfg-java-tag">—</span>
+              <small class="field-desc" id="cfg-java-reason">—</small>
+              <small class="field-desc field-notes" id="cfg-java-hint">
+                Change the MC Version (or Server Type) to switch Java runtimes.
+              </small>
+            </div>
+          </label>
+        </div>
+
+        <!-- Common fields (always shown) -->
+        <div class="config-grid">
+          <label class="config-field">
+            <span>MC Version</span>
+            <span id="cfg-version-slot"><select id="cfg-version"></select></span>
+            <small class="field-desc" id="version-source">—</small>
+          </label>
+
+          <!-- Type-specific fields are injected here -->
+          <div id="type-extra-fields" style="display:contents"></div>
+
+          <label class="config-field">
+            <span>Memory</span>
+            <input type="text" id="cfg-memory" placeholder="2G">
+          </label>
+          <label class="config-field config-field-wide">
+            <span>MOTD</span>
+            <input type="text" id="cfg-motd">
+          </label>
+          <label class="config-field config-field-wide">
+            <span>Icon URL</span>
+            <input type="text" id="cfg-icon">
+          </label>
+          <label class="config-field">
+            <span>Difficulty</span>
+            <select id="cfg-difficulty">
+              <option value="">(default)</option>
+              <option>peaceful</option><option>easy</option>
+              <option>normal</option><option>hard</option>
+            </select>
+          </label>
+          <label class="config-field">
+            <span>Max Players</span>
+            <input type="number" id="cfg-maxplayers" min="1" max="200" placeholder="20">
+          </label>
+        </div>
+
+        <div class="btn-row">
+          <button class="mc-btn mc-btn-warn" id="btn-config-save">💾 Save Changes</button>
+          <button class="mc-btn mc-btn-danger" id="btn-config-save-recreate">💾 Save & Recreate</button>
+        </div>
+        <div class="hint" id="config-hint"></div>
+
+        <h3 class="sub-h">Raw Environment</h3>
+        <pre id="config-raw" class="config-raw">loading…</pre>
+      </section>
+
+      <!-- UPDATES TAB -->
+      <section class="tab tab-updates" data-tab="updates">
+        <div class="tab-head">
+          <h2>📦 Pending Updates</h2>
+          <div class="tab-actions">
+            <button class="mc-btn mc-btn-warn" id="btn-apply-pending">⟲ Apply Pending — Choose When…</button>
+            <button class="mc-btn" id="btn-clear-pending">Cancel All</button>
+          </div>
+        </div>
+        <div class="update-banner" id="update-banner">
+          <p>Plugin and Paper updates are staged in <code>plugins/update/</code> and applied automatically by Paper on the next restart — zero clobbering of running jars.</p>
+        </div>
+        <div class="update-banner schedule-banner" id="schedule-banner" hidden></div>
+
+        <div class="recurring-card" id="recurring-card">
+          <div class="recurring-head">
+            <h3 class="sub-h" style="margin:0">🔁 Recurring Restart</h3>
+            <div class="recurring-actions">
+              <button class="mc-btn" id="btn-recurring-edit">Set / Edit…</button>
+              <button class="mc-btn mc-btn-danger" id="btn-recurring-delete" hidden>Remove</button>
+            </div>
+          </div>
+          <div class="recurring-summary" id="recurring-summary">
+            <span class="empty">No recurring schedule. Click Set / Edit to add one.</span>
+          </div>
+        </div>
+
+        <h3 class="sub-h">Plugins waiting to be applied</h3>
+        <div id="pending-list" class="pending-list">
+          <div class="empty">Nothing pending. Stage updates from the Plugins tab.</div>
+        </div>
+
+        <h3 class="sub-h" id="updates-server-heading">📦 Server Updates</h3>
+        <div class="paper-card" id="paper-card">
+          <div class="paper-info">
+            <div><label>Type</label><span id="paper-type">—</span></div>
+            <div><label>Installed</label><span id="paper-current">—</span></div>
+            <div><label>Latest Stable</label><span id="paper-latest">—</span></div>
+          </div>
+          <div id="paper-update-notice" class="paper-update-notice" hidden></div>
+          <div class="tab-actions">
+            <button class="mc-btn" id="btn-paper-check">↻ Check for Update</button>
+            <button class="mc-btn mc-btn-warn" id="btn-server-update">⬆ Update to Latest Stable</button>
+          </div>
+          <p class="hint" id="paper-card-notes" style="margin:0">For a specific version or build, use the <a href="#" class="tab-jump" data-tab="server">Server</a> tab.</p>
+        </div>
+      </section>
+
+      <!-- CONSOLE TAB -->
+      <section class="tab tab-console" data-tab="console">
+        <div class="tab-head">
+          <h2>📜 Server Console</h2>
+          <div class="tab-actions">
+            <label class="check-toggle"><input type="checkbox" id="console-follow" checked> Auto-scroll</label>
+            <button class="mc-btn" id="btn-console-clear">Clear</button>
+            <button class="mc-btn" id="btn-console-toggle">⏸ Pause</button>
+          </div>
+        </div>
+        <div class="console-window" id="console-window">
+          <div class="console-line dim">Connecting to log stream…</div>
+        </div>
+      </section>
+
+      <!-- ABOUT TAB -->
+      <section class="tab tab-about" data-tab="about">
+        <div class="tab-head"><h2>ⓘ About Test Fred Hub</h2></div>
+        <div class="about-grid">
+          <div class="about-card">
+            <h3>What is this?</h3>
+            <p>A self-hosted hub for managing the <strong>test-fred</strong> Minecraft server. Built with FastAPI + vanilla JS, inspired by the Mojang Launcher.</p>
+          </div>
+          <div class="about-card">
+            <h3>Plugin Sources</h3>
+            <ul>
+              <li><span class="source modrinth">modrinth</span> — Modrinth REST API, SHA-512 hash matching</li>
+              <li><span class="source hangar">hangar</span> — Hangar (PaperMC) projects API</li>
+              <li><span class="source geyser">geyser</span> — official download.geysermc.org/v2</li>
+              <li><span class="source spiget">spiget</span> — Spiget mirror of SpigotMC resources</li>
+            </ul>
+          </div>
+          <div class="about-card">
+            <h3>Update Workflow</h3>
+            <ol>
+              <li>Hub downloads jar to <code>plugins/update/</code> with matching filename</li>
+              <li>You click <em>Restart &amp; Apply</em></li>
+              <li>Paper detects the update folder and swaps jars atomically on startup</li>
+            </ol>
+          </div>
+          <div class="about-card">
+            <h3>Permissions</h3>
+            <p>The hub talks to <code>/var/run/docker.sock</code> directly — no sudo needed because <code>kratos</code> is in the <code>docker</code> group. Restart/start/stop all flow through Docker's API.</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script src="/static/app.js?v=16"></script>
+</body>
+</html>
