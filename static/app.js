@@ -959,6 +959,13 @@ async function refreshRegistry() {
     }
     // Premium-only plugins — show them so users know we know they exist,
     // but make the manual-upload path obvious.
+    if (premium.length) {
+      const sep = document.createElement("h3");
+      sep.className = "sub-h";
+      sep.style.cssText = "grid-column:1/-1;margin-top:18px;color:#fbbf24";
+      sep.textContent = "💎 Premium Plugins (manual upload)";
+      root.appendChild(sep);
+    }
     for (const p of premium) {
       const card = document.createElement("div");
       card.className = "reg-item reg-premium";

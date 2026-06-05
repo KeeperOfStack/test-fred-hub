@@ -600,6 +600,28 @@ body {
 }
 
 /* ── Form grids — Server tab + Add Server modal ────────────────────── */
+.tab-server .config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px 18px;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  background: rgba(0,0,0,0.22);
+  border: 2px solid var(--panel-border);
+  border-radius: 4px;
+  position: relative;
+}
+.tab-server .config-grid::before {
+  content: attr(data-section);
+  position: absolute;
+  top: -10px; left: 14px;
+  background: var(--panel-bg);
+  padding: 0 8px;
+  font-family: "Press Start 2P", monospace;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--gold);
+}
 .config-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -798,15 +820,14 @@ body {
   font-family: "VT323", monospace;
   font-size: 15px;
 }
-.server-switcher-row button {
-  background: var(--dirt-2);
-  color: var(--gold);
-  border: 1px solid var(--panel-border);
-  border-radius: 3px;
+.server-switcher-row .mc-btn-sm {
+  /* keep the green/red gradients from .mc-btn / .mc-btn-danger,
+     just shrink for the sidebar slot */
   padding: 4px 8px;
-  cursor: pointer;
+  font-size: 13px;
+  min-width: 28px;
+  justify-content: center;
 }
-.server-switcher-row button:hover { background: var(--dirt-1); }
 
 /* ── Recurring restart schedule card ───────────────────────────────── */
 .recurring-card {
@@ -887,12 +908,27 @@ body {
 
 /* ── Catalog page ──────────────────────────────────────────────────── */
 .registry-list { display: grid; gap: 10px; }
+.reg-item,
 .reg-row {
   display: flex; gap: 12px; align-items: flex-start;
-  background: rgba(0,0,0,0.25);
-  border: 1px solid var(--panel-border);
-  border-radius: 3px;
-  padding: 10px 12px;
+  background: linear-gradient(180deg, rgba(0,0,0,0.32), rgba(0,0,0,0.18));
+  border: 2px solid var(--panel-border);
+  border-left: 4px solid var(--emerald-d);
+  border-radius: 4px;
+  padding: 12px 14px;
+  box-shadow: 2px 2px 0 rgba(0,0,0,0.25);
+  transition: border-color 0.15s, transform 0.08s;
+}
+.reg-item:hover,
+.reg-row:hover {
+  border-left-color: var(--emerald-l);
+  transform: translateX(2px);
+}
+.reg-premium {
+  border-left-color: var(--gold);
+}
+.reg-premium:hover {
+  border-left-color: #fde047;
 }
 .reg-body { flex: 1; }
 .reg-body h3 {

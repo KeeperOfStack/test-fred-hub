@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/style.css?v=10" />
+<link rel="stylesheet" href="/static/style.css?v=11" />
 </head>
 <body>
   <div class="launcher">
@@ -180,7 +180,7 @@
         <p class="hint">Edits the compose file at <code id="compose-path">—</code>. Changes are written immediately but only take effect on container recreate.</p>
 
         <!-- Type picker is always present -->
-        <div class="config-grid config-grid-top">
+        <div class="config-grid config-grid-top" data-section="◆ TYPE & RUNTIME">
           <label class="config-field config-field-wide">
             <span>Server Type</span>
             <select id="cfg-type"></select>
@@ -200,7 +200,7 @@
         </div>
 
         <!-- Common fields (always shown) -->
-        <div class="config-grid">
+        <div class="config-grid" data-section="◆ WORLD & GAMEPLAY">
           <label class="config-field">
             <span>MC Version</span>
             <span id="cfg-version-slot"><select id="cfg-version"></select></span>
@@ -346,6 +346,6 @@
 
   <div id="toast-container"></div>
 
-  <script src="/static/app.js?v=16"></script>
+  <script src="/static/app.js?v=17"></script>
 </body>
 </html>
