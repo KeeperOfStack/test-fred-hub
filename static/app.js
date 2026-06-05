@@ -774,22 +774,20 @@ function renderPlugins(list, updateInfo = {}) {
       ? `<a href="${info.project_url}" target="_blank" rel="noopener"><button class="mc-btn">↗ Page</button></a>` : "";
     const updateBtn = info?.update_available
       ? `<button class="mc-btn mc-btn-warn" data-action="stage" data-file="${p.file}">Stage Update</button>` : "";
-    // If this installed plugin isn't in the catalog yet, offer a "+ Catalog"
-    // button so the hub can start tracking its updates. Source info is auto-
-    // included when the plugin update-checker has already matched it upstream
-    // (info.source + info.source_ref); otherwise we send no sources and rely
-    // on the backend's airtight name-search fallback chain.
-    const pluginKey = normalizeKey(p.name);
-    const isInCatalog = pluginKey && catalogKeys().has(pluginKey);
+    // If this installed plugin isn't in the catalog yet, offer a small "+" icon
+    // so the hub can start tracking its updates. Membership check uses substring
+    // matching (mirrors backend registry.find) so "GravesX" → catalog key
+    // "graves" dedupes properly. Source info is auto-included when the plugin
+    // update-checker has already matched it upstream.
     const sourceRef = info?.source_ref || info?.project_id || info?.slug || "";
     const sourceName = (info?.source || "").toLowerCase();
-    const addCatalogBtn = (!isInCatalog && p.name)
-      ? `<button class="mc-btn mc-btn-warn plugin-catalog-add-btn"
-                 data-key="${pluginKey}"
+    const addCatalogBtn = (p.name && !isInCatalog(p.name))
+      ? `<button class="mc-btn mc-btn-icon plugin-catalog-add-btn"
+                 data-key="${normalizeKey(p.name)}"
                  data-display="${(p.name || "").replace(/"/g, "&quot;")}"
                  data-source="${sourceName}"
                  data-ref="${(sourceRef || "").toString().replace(/"/g, "&quot;")}"
-                 title="Add ${p.name} to your catalog so the hub tracks updates and shows it in Install All Missing">＋ Catalog</button>`
+                 title="Add ${p.name} to catalog">＋</button>`
       : "";
     // Use the remembered installed version when available (more precise than plugin.yml)
     const installedVersion = info?.current_version || p.version || "?";
@@ -965,9 +963,26 @@ async function refreshRegistry({ force = false } = {}) {
     // ?fast=1 → skip live Spiget calls, cache-only. Slow path runs only on
     // explicit refresh from the Refresh button.
     const path = force ? "/api/registry" : "/api/registry?fast=1";
+    const previousKeyCount = (_lastRegistry?.items || []).length
+                           + (_lastRegistry?.premium || []).length;
     const r = await api(path);
     _lastRegistry = r;
     renderRegistry(r);
+    // If the registry just loaded for the first time (or its set of keys
+    // changed), re-render any view that depends on catalog membership so
+    // the "+" icons disappear on already-tracked plugins.
+    const newKeyCount = (r.items || []).length + (r.premium || []).length;
+    if (newKeyCount !== previousKeyCount) {
+      // Re-render plugins from the in-memory snapshot (no API call needed —
+      // the plugin update-info hasn't changed, only catalog membership).
+      const pluginsRoot = $("plugins-list");
+      if (pluginsRoot?.querySelector(".plugin")) {
+        // Best-effort: re-trigger refreshPlugins to repaint via the same path.
+        refreshPlugins();
+      }
+      // Search hits also key off catalog membership.
+      if ((_searchLastHits || []).length) renderSearchResults();
+    }
   } catch (e) { toast("Catalog load failed: " + e.message, "err"); }
 }
 
@@ -984,15 +999,43 @@ function normalizeKey(name) {
   return (name || "").trim().toLowerCase().replace(/\s+/g, "").replace(/_/g, "-");
 }
 
-/** Returns a Set of normalised catalog keys from the last /api/registry payload.
- *  Empty Set if the registry hasn't loaded yet — callers should treat that as
- *  "I don't know" and still show the + button (the backend will dedupe). */
+/** Returns the set of normalised catalog keys from the last /api/registry payload.
+ *  Empty Set if the registry hasn't loaded yet — callers that depend on this
+ *  for membership checks should also re-render on registry load. */
 function catalogKeys() {
   const keys = new Set();
   for (const it of (_lastRegistry?.items || [])) {
     if (it?.key) keys.add(normalizeKey(it.key));
+    if (it?.display) keys.add(normalizeKey(it.display));
   }
   return keys;
+}
+
+/** Returns the set of premium spigot IDs already added to the user's premium
+ *  catalog (user_added=true) AND the built-in premium catalog. Used so the
+ *  '+ Add to Catalog' button on premium search hits hides itself once the
+ *  plugin is being tracked. */
+function premiumCatalogIds() {
+  const ids = new Set();
+  for (const p of (_lastRegistry?.premium || [])) {
+    if (p?.spigot_id) ids.add(String(p.spigot_id));
+  }
+  return ids;
+}
+
+/** Best-effort 'is this plugin already in the catalog?' check that mirrors
+ *  backend registry.find() — exact match OR substring containment in either
+ *  direction. This is what lets "GravesX" (plugin.yml name) match catalog
+ *  entry "graves" without the user having to think about it. */
+function isInCatalog(name) {
+  const key = normalizeKey(name);
+  if (!key) return false;
+  const keys = catalogKeys();
+  if (keys.has(key)) return true;
+  for (const k of keys) {
+    if (k && (k === key || k.includes(key) || key.includes(k))) return true;
+  }
+  return false;
 }
 
 /** Generic "add to catalog" — used by both the search-result + button and the
@@ -1004,7 +1047,7 @@ async function addToCatalog(entry, btn) {
   if (!key) { toast("Cannot add — no name available.", "err"); return false; }
   const display = (entry.display || entry.key || "").trim() || key;
   const sources = Array.isArray(entry.sources) ? entry.sources : [];
-  if (btn) busy(btn, true, "Adding…");
+  if (btn) busy(btn, true, "…");
   try {
     const r = await api("/api/catalog", {
       method: "POST",
@@ -1448,23 +1491,25 @@ function renderSearchResults() {
     // version checks) AND "↗ Buy + Upload" (opens Spigot to actually purchase).
     // Both are needed — adding to catalog without uploading the jar doesn't
     // install anything; uploading without adding means no future update alerts.
-    // Non-premium: Install button + "+ Add to Catalog" button (so the user can
-    // promote a one-off search hit into a tracked catalog entry without going
-    // through a modal). Premium hits keep their existing flow.
-    const inCatalog = catalogKeys().has(normalizeKey(h.title));
-    const addBtnHtml = inCatalog ? "" : `
-      <button class="mc-btn mc-btn-warn search-catalog-add-btn"
-              data-source="${h.source}"
-              data-ref="${h.ref}"
-              data-title="${(h.title || "").replace(/"/g, "&quot;")}"
-              title="Add this plugin to your catalog so the hub tracks updates and shows it in Install All Missing">＋ Catalog</button>`;
-    const actionBtn = h.premium
-      ? `<button class="mc-btn mc-btn-warn search-premium-add-btn"
+    // Compact action layout — small "+" icon to add to catalog when not yet
+    // tracked, then either Install (non-premium) or Buy link (premium).
+    const inCatalog = h.premium
+      ? premiumCatalogIds().has(String(h.ref))
+      : isInCatalog(h.title);
+    const addBtnHtml = inCatalog ? "" : (h.premium
+      ? `<button class="mc-btn mc-btn-icon search-premium-add-btn"
                  data-spigot-id="${h.ref}"
                  data-title="${(h.title || "").replace(/"/g, "&quot;")}"
                  data-url="${(h.url || "").replace(/"/g, "&quot;")}"
                  data-icon="${(h.icon || "").replace(/"/g, "&quot;")}"
-                 title="Add this premium plugin to your catalog so the hub tracks new releases">＋ Add to Catalog</button>
+                 title="Add ${h.title || "this premium plugin"} to catalog (manual upload required)">＋</button>`
+      : `<button class="mc-btn mc-btn-icon search-catalog-add-btn"
+                 data-source="${h.source}"
+                 data-ref="${h.ref}"
+                 data-title="${(h.title || "").replace(/"/g, "&quot;")}"
+                 title="Add ${h.title || "this plugin"} to catalog">＋</button>`);
+    const actionBtn = h.premium
+      ? `${addBtnHtml}
          ${h.url ? `<a href="${h.url}" target="_blank" rel="noopener">↗ Buy on Spigot</a>` : ""}`
       : `<button class="mc-btn search-install-btn"
                 data-source="${h.source}"
@@ -3193,23 +3238,20 @@ window.addEventListener("DOMContentLoaded", () => {
     if (addBtn) {
       const sid = addBtn.dataset.spigotId;
       const title = addBtn.dataset.title || `Spigot #${sid}`;
-      if (!(await confirmModal({
-        title: `Add ${title} to catalog?`,
-        message: `Adds Spigot ID ${sid} to your premium catalog. The hub will check for new versions every hour but cannot auto-download — you'll still need to buy + upload the jar yourself.`,
-        confirmText: "Add to Catalog", danger: false,
-      }))) return;
-      busy(addBtn, true, "Adding…");
+      busy(addBtn, true, "…");
       try {
         const r = await api("/api/premium", {
           method: "POST",
           body: { spigot_id: sid, display: title, url: addBtn.dataset.url || "", icon: addBtn.dataset.icon || null },
         });
         if (r.premium_confirmed === false) {
-          toast(`${title} added — but Spiget says it isn't actually premium. You may be able to install it normally from search.`, "ok");
+          toast(`${title} added — Spiget says it's not actually premium; you may be able to install it normally.`, "ok");
         } else {
-          toast(`${title} added to catalog.`, "ok");
+          toast(`${title} added to catalog (premium — manual upload required).`, "ok");
         }
         await refreshRegistry();
+        // Re-render search hits so this row's + icon disappears.
+        renderSearchResults();
       } catch (err) {
         toast(`Add failed: ${err.message}`, "err");
       } finally { busy(addBtn, false); }

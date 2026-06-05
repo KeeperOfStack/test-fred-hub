@@ -385,6 +385,24 @@ body {
 .mc-btn:disabled { filter: grayscale(0.7) brightness(0.7); cursor: not-allowed; }
 .mc-btn-sm { padding: 6px 10px; font-size: 13px; }
 
+/* Tiny square + button for "add to catalog" affordance on search hits and
+   installed-plugin rows. Lemon/gold tint to read as "promote" rather than
+   "destructive" or "primary action". Tooltip provides the verbose label. */
+.mc-btn-icon {
+  width: 28px; height: 28px;
+  padding: 0;
+  font-size: 18px;
+  font-weight: bold;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(to bottom, #fde68a 0 4px, #fbbf24 4px 60%, #d97706 60% 100%);
+  color: #1f1407;
+  text-shadow: none;
+}
+.mc-btn-icon:hover { filter: brightness(1.1); }
+
 .mc-btn-danger {
   background: linear-gradient(to bottom, #e8675a 0 4px, var(--redstone) 4px 60%, var(--redstone-d) 60% 100%);
 }
