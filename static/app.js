@@ -1000,6 +1000,9 @@ function normalizeKey(name) {
 }
 
 /** Returns the set of normalised catalog keys from the last /api/registry payload.
+ *  Includes BOTH regular catalog entries AND premium catalog entries — so the
+ *  '+ icon' on the plugins page correctly hides for installed plugins that
+ *  are tracked as premium (e.g. mcMMO via PREMIUM_PLUGINS).
  *  Empty Set if the registry hasn't loaded yet — callers that depend on this
  *  for membership checks should also re-render on registry load. */
 function catalogKeys() {
@@ -1007,6 +1010,16 @@ function catalogKeys() {
   for (const it of (_lastRegistry?.items || [])) {
     if (it?.key) keys.add(normalizeKey(it.key));
     if (it?.display) keys.add(normalizeKey(it.display));
+  }
+  for (const p of (_lastRegistry?.premium || [])) {
+    if (p?.display) keys.add(normalizeKey(p.display));
+    // Premium entries also expose their alternatives' labels — match those
+    // too so the free-fork the user installed dedupes against the premium
+    // umbrella ("Classic mcMMO" installed → premium "mcMMO (Official)" entry
+    // covers it via its alternatives list).
+    for (const alt of (p?.alternatives || [])) {
+      if (alt?.label) keys.add(normalizeKey(alt.label));
+    }
   }
   return keys;
 }
