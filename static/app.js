@@ -774,6 +774,23 @@ function renderPlugins(list, updateInfo = {}) {
       ? `<a href="${info.project_url}" target="_blank" rel="noopener"><button class="mc-btn">↗ Page</button></a>` : "";
     const updateBtn = info?.update_available
       ? `<button class="mc-btn mc-btn-warn" data-action="stage" data-file="${p.file}">Stage Update</button>` : "";
+    // If this installed plugin isn't in the catalog yet, offer a "+ Catalog"
+    // button so the hub can start tracking its updates. Source info is auto-
+    // included when the plugin update-checker has already matched it upstream
+    // (info.source + info.source_ref); otherwise we send no sources and rely
+    // on the backend's airtight name-search fallback chain.
+    const pluginKey = normalizeKey(p.name);
+    const isInCatalog = pluginKey && catalogKeys().has(pluginKey);
+    const sourceRef = info?.source_ref || info?.project_id || info?.slug || "";
+    const sourceName = (info?.source || "").toLowerCase();
+    const addCatalogBtn = (!isInCatalog && p.name)
+      ? `<button class="mc-btn mc-btn-warn plugin-catalog-add-btn"
+                 data-key="${pluginKey}"
+                 data-display="${(p.name || "").replace(/"/g, "&quot;")}"
+                 data-source="${sourceName}"
+                 data-ref="${(sourceRef || "").toString().replace(/"/g, "&quot;")}"
+                 title="Add ${p.name} to your catalog so the hub tracks updates and shows it in Install All Missing">＋ Catalog</button>`
+      : "";
     // Use the remembered installed version when available (more precise than plugin.yml)
     const installedVersion = info?.current_version || p.version || "?";
     card.innerHTML = `
@@ -788,7 +805,7 @@ function renderPlugins(list, updateInfo = {}) {
         </div>
         ${errLine}
         <div class="plugin-actions">
-          ${updateBtn}${projectLink}
+          ${updateBtn}${addCatalogBtn}${projectLink}
           <button class="mc-btn mc-btn-danger" data-action="delete" data-file="${p.file}">Delete</button>
         </div>
       </div>`;
@@ -957,6 +974,54 @@ async function refreshRegistry({ force = false } = {}) {
 // Snapshot of the last /api/registry response. Used so install/cancel can
 // patch a single card without round-tripping the whole list.
 let _lastRegistry = null;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalog membership helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Lowercase normaliser that matches backend `registry.normalize`. */
+function normalizeKey(name) {
+  return (name || "").trim().toLowerCase().replace(/\s+/g, "").replace(/_/g, "-");
+}
+
+/** Returns a Set of normalised catalog keys from the last /api/registry payload.
+ *  Empty Set if the registry hasn't loaded yet — callers should treat that as
+ *  "I don't know" and still show the + button (the backend will dedupe). */
+function catalogKeys() {
+  const keys = new Set();
+  for (const it of (_lastRegistry?.items || [])) {
+    if (it?.key) keys.add(normalizeKey(it.key));
+  }
+  return keys;
+}
+
+/** Generic "add to catalog" — used by both the search-result + button and the
+ *  plugins-page + button. `entry` shape: { key, display, sources: [{source,ref}] }
+ *  Sources may be empty — backend's airtight fallbacks will still resolve the
+ *  plugin at install time by name search. */
+async function addToCatalog(entry, btn) {
+  const key = normalizeKey(entry.key || entry.display);
+  if (!key) { toast("Cannot add — no name available.", "err"); return false; }
+  const display = (entry.display || entry.key || "").trim() || key;
+  const sources = Array.isArray(entry.sources) ? entry.sources : [];
+  if (btn) busy(btn, true, "Adding…");
+  try {
+    const r = await api("/api/catalog", {
+      method: "POST",
+      body: { key, display, sources },
+    });
+    toast(`${display} ${r.is_update ? "updated in" : "added to"} catalog.`, "ok");
+    // Refresh catalog so subsequent reloads see the new entry; refresh plugins
+    // so the + button disappears from the matching row.
+    await Promise.all([refreshRegistry({ force: false }), refreshPlugins()]);
+    return true;
+  } catch (e) {
+    toast(`Add failed: ${e.message}`, "err");
+    return false;
+  } finally {
+    if (btn) busy(btn, false);
+  }
+}
 
 function renderRegistry(r) {
   const root = $("registry-list");
@@ -1383,6 +1448,16 @@ function renderSearchResults() {
     // version checks) AND "↗ Buy + Upload" (opens Spigot to actually purchase).
     // Both are needed — adding to catalog without uploading the jar doesn't
     // install anything; uploading without adding means no future update alerts.
+    // Non-premium: Install button + "+ Add to Catalog" button (so the user can
+    // promote a one-off search hit into a tracked catalog entry without going
+    // through a modal). Premium hits keep their existing flow.
+    const inCatalog = catalogKeys().has(normalizeKey(h.title));
+    const addBtnHtml = inCatalog ? "" : `
+      <button class="mc-btn mc-btn-warn search-catalog-add-btn"
+              data-source="${h.source}"
+              data-ref="${h.ref}"
+              data-title="${(h.title || "").replace(/"/g, "&quot;")}"
+              title="Add this plugin to your catalog so the hub tracks updates and shows it in Install All Missing">＋ Catalog</button>`;
     const actionBtn = h.premium
       ? `<button class="mc-btn mc-btn-warn search-premium-add-btn"
                  data-spigot-id="${h.ref}"
@@ -1395,6 +1470,7 @@ function renderSearchResults() {
                 data-source="${h.source}"
                 data-ref="${h.ref}"
                 data-title="${(h.title || "").replace(/"/g, "&quot;")}">＋ Install</button>
+         ${addBtnHtml}
          ${h.url ? `<a href="${h.url}" target="_blank" rel="noopener">↗ View</a>` : ""}`;
     card.innerHTML = `
       ${iconHtml}
@@ -2884,7 +2960,20 @@ window.addEventListener("DOMContentLoaded", () => {
     if (f) uploadPlugin(f);
     e.target.value = "";
   });
-  $("plugins-list").addEventListener("click", (e) => {
+  $("plugins-list").addEventListener("click", async (e) => {
+    const catBtn = e.target.closest(".plugin-catalog-add-btn");
+    if (catBtn) {
+      const sources = [];
+      if (catBtn.dataset.source && catBtn.dataset.ref) {
+        sources.push({ source: catBtn.dataset.source, ref: catBtn.dataset.ref });
+      }
+      await addToCatalog({
+        key: catBtn.dataset.key,
+        display: catBtn.dataset.display,
+        sources,
+      }, catBtn);
+      return;
+    }
     const btn = e.target.closest("button[data-action]");
     if (!btn) return;
     const file = btn.dataset.file;
@@ -2895,7 +2984,8 @@ window.addEventListener("DOMContentLoaded", () => {
   // Catalog
   $("btn-registry-refresh").addEventListener("click", () => refreshRegistry({ force: true }));
   $("btn-install-all").addEventListener("click", (e) => installAllMissing(e.currentTarget));
-  $("btn-catalog-add").addEventListener("click", () => openCatalogEntryModal());
+  // (catalog "+ Add Entry" button removed — users now add via the + button on
+  // search results and on installed plugins not yet in the catalog.)
   $("btn-catalog-reset").addEventListener("click", async () => {
     if (!(await confirmModal({
       title: "Reset catalog to defaults?",
@@ -3080,6 +3170,23 @@ window.addEventListener("DOMContentLoaded", () => {
     const installBtn = e.target.closest(".search-install-btn");
     if (installBtn) {
       installFromSearch(installBtn.dataset.source, installBtn.dataset.ref, installBtn.dataset.title, installBtn);
+      return;
+    }
+    const catalogBtn = e.target.closest(".search-catalog-add-btn");
+    if (catalogBtn) {
+      const sources = [];
+      if (catalogBtn.dataset.source && catalogBtn.dataset.ref) {
+        sources.push({ source: catalogBtn.dataset.source, ref: catalogBtn.dataset.ref });
+      }
+      const ok = await addToCatalog({
+        key: catalogBtn.dataset.title,
+        display: catalogBtn.dataset.title,
+        sources,
+      }, catalogBtn);
+      if (ok) {
+        // Re-render search results so the button disappears for this hit.
+        renderSearchResults();
+      }
       return;
     }
     const addBtn = e.target.closest(".search-premium-add-btn");
