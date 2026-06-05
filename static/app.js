@@ -951,7 +951,7 @@ async function refreshRegistry() {
           <h3>${item.display} <span style="opacity:0.5;font-size:11px;font-weight:normal">(${item.key})</span></h3>
           <div class="reg-sources">${sources}</div>
         </div>
-        <div class="reg-action" style="display:flex;flex-direction:column;align-items:flex-end">
+        <div class="reg-action">
           ${installAction}
           ${editAction}
         </div>`;
@@ -1002,7 +1002,7 @@ async function refreshRegistry() {
           <div class="premium-status" style="margin-top:6px;font-size:12px">${versionLine}${releaseLine}</div>
           <div class="premium-fallbacks" style="display:none;margin-top:8px;display:flex;flex-direction:column;gap:6px"></div>
         </div>
-        <div class="reg-action" style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+        <div class="reg-action">
           <button class="mc-btn premium-try-btn" style="background:linear-gradient(180deg,#4ade80 0%,#16a34a 100%)">📁 Manual Upload</button>
           <a href="${p.url}" target="_blank" rel="noopener" style="font-size:11px;opacity:0.7">↗ View on Spigot</a>
           ${removeBtn}
