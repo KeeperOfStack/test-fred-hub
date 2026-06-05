@@ -1,7 +1,32 @@
+# ── Python ──────────────────────────────────────────────────────────────
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
 .venv/
+venv/
+env/
+
+# ── Runtime state (per-server caches, catalogs, scheduled jobs) ─────────
+# Everything in data/ is generated at runtime and is server-specific.
+# Do NOT commit — fresh installs seed catalogs from app/registry.py.
+data/
+downloaded_files/
 logs/
-data/audit-*.jsonl
-*.log
+
+# ── Local backups produced by the dev workflow ──────────────────────────
 .backups/
+*.tar.gz
+
+# ── Editors / OS ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Misc ────────────────────────────────────────────────────────────────
+*.log
+*.pid
+.env
+.env.local
