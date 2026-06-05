@@ -531,10 +531,13 @@ async function refreshServer() {
     $("foot-version").textContent = `${s.version || "?"}-${s.build || "?"}`;
 
     // pending
-    renderPending(s.pending_updates || [], s.pending_deletions || []);
+    renderPending(s.pending_updates || [], s.pending_deletions || [], s.pending_installs || []);
     const badge = $("nav-updates-badge");
-    if ((s.pending_updates || []).length) {
-      badge.hidden = false; badge.textContent = s.pending_updates.length;
+    const pendingTotal = (s.pending_updates || []).length
+                      + (s.pending_installs || []).length
+                      + (s.pending_deletions || []).length;
+    if (pendingTotal) {
+      badge.hidden = false; badge.textContent = pendingTotal;
     } else { badge.hidden = true; }
 
   } catch (e) {
@@ -542,15 +545,21 @@ async function refreshServer() {
   }
 }
 
-function renderPending(updates, deletions = []) {
+function renderPending(updates, deletions = [], installs = []) {
   const root = $("pending-list");
-  if (!updates.length && !deletions.length) {
+  if (!updates.length && !deletions.length && !installs.length) {
     root.innerHTML = '<div class="empty">Nothing pending. Stage updates from the Plugins tab.</div>';
     return;
   }
+  const installRows = installs.map((f) =>
+    `<div class="pending-item pending-install">
+       <span>➕ ${f} <small style="opacity:0.7">— new install, loads on next restart</small></span>
+       <button class="mc-btn mc-btn-danger" data-action="cancel-install" data-file="${f}">Cancel</button>
+     </div>`
+  ).join("");
   const updateRows = updates.map((f) =>
     `<div class="pending-item">
-       <span>⏳ ${f}</span>
+       <span>⏳ ${f} <small style="opacity:0.7">— update staged</small></span>
        <button class="mc-btn mc-btn-danger" data-action="cancel-pending" data-file="${f}">Cancel</button>
      </div>`
   ).join("");
@@ -560,7 +569,7 @@ function renderPending(updates, deletions = []) {
        <button class="mc-btn" data-action="cancel-deletion" data-file="${f}">Keep</button>
      </div>`
   ).join("");
-  root.innerHTML = updateRows + deleteRows;
+  root.innerHTML = installRows + updateRows + deleteRows;
 }
 
 async function refreshPaperCard() {
@@ -2951,23 +2960,58 @@ window.addEventListener("DOMContentLoaded", () => {
       await refreshRecurring();
     } catch (e) { toast("Remove failed: " + e.message, "err"); }
   });
-  $("btn-clear-pending").addEventListener("click", async () => {
+  $("btn-clear-pending").addEventListener("click", async (e) => {
+    const s = lastServer;
+    const counts = {
+      updates: (s?.pending_updates || []).length,
+      installs: (s?.pending_installs || []).length,
+      deletions: (s?.pending_deletions || []).length,
+    };
+    const parts = [];
+    if (counts.updates) parts.push(`${counts.updates} plugin update(s)`);
+    if (counts.installs) parts.push(`${counts.installs} new install(s)`);
+    if (counts.deletions) parts.push(`${counts.deletions} pending deletion(s)`);
+    parts.push("any staged server version change");
     if (!(await confirmModal({
-      title: "Cancel all pending updates?",
-      message: "Removes every jar in plugins/update/ and clears the staged-memory entries. Already-running plugins are not affected.",
-      confirmText: "Clear All", danger: true,
+      title: "Cancel ALL staged changes?",
+      message: `This will undo: ${parts.join(", ")}.\n\nUpdates: jars removed from plugins/update/.\nNew installs: jar removed from plugins/.\nDeletions: dropped from the staged-deletions list.\nServer change: compose env reverted to the currently-running container's version/build.\n\nAlready-running plugins are not affected.`,
+      confirmText: "Cancel ALL", danger: true,
     }))) return;
-    const s = lastServer; if (!s) return;
-    for (const f of s.pending_updates || []) {
-      try { await api(`/api/plugins/pending/${encodeURIComponent(f)}`, { method: "DELETE" }); }
-      catch { toast("Cancel " + f + " failed", "err"); }
+    busy(e.currentTarget, true, "Cancelling…");
+    try {
+      const r = await api("/api/server/cancel-all-staged", {
+        method: "POST", body: JSON.stringify({}),
+      });
+      const summary = [];
+      if ((r.cancelled_updates || []).length) summary.push(`${r.cancelled_updates.length} update(s)`);
+      if ((r.cancelled_installs || []).length) summary.push(`${r.cancelled_installs.length} install(s)`);
+      if ((r.cancelled_deletions || []).length) summary.push(`${r.cancelled_deletions.length} deletion(s)`);
+      if (r.reverted_server) summary.push("server version reverted");
+      toast(summary.length ? `Cleared: ${summary.join(", ")}.` : "Nothing was pending.", "ok");
+      if ((r.errors || []).length) {
+        toast(`Some errors: ${r.errors.slice(0, 2).join("; ")}`, "err");
+      }
+      await Promise.all([refreshServer(), refreshPlugins(), refreshPaperCard()]);
+    } catch (err) {
+      toast("Cancel-all failed: " + err.message, "err");
+    } finally {
+      busy(e.currentTarget, false);
     }
-    toast("Cleared pending.", "ok");
-    refreshServer();
   });
   $("pending-list").addEventListener("click", async (e) => {
     const cancelBtn = e.target.closest("button[data-action='cancel-pending']");
     if (cancelBtn) { cancelPending(cancelBtn.dataset.file, cancelBtn); return; }
+    const installBtn = e.target.closest("button[data-action='cancel-install']");
+    if (installBtn) {
+      const file = installBtn.dataset.file;
+      busy(installBtn, true, "Cancelling…");
+      try {
+        await api(`/api/plugins/${encodeURIComponent(file)}/staged-install`, { method: "DELETE" });
+        toast(`Removed ${file}.`, "ok");
+        await Promise.all([refreshServer(), refreshPlugins()]);
+      } catch (err) { toast("Cancel failed: " + err.message, "err"); busy(installBtn, false); }
+      return;
+    }
     const keepBtn = e.target.closest("button[data-action='cancel-deletion']");
     if (keepBtn) {
       const file = keepBtn.dataset.file;

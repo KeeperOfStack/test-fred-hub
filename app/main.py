@@ -758,6 +758,37 @@ async def server_status() -> dict:
     update_dir = paths["update"]
     pending_updates = sorted(p.name for p in update_dir.glob("*.jar")) if update_dir.exists() else []
 
+    # Fresh installs: jars in plugins/ that have a staged-memory entry
+    # ``staged_at`` newer than the container's StartedAt. These are pending in
+    # the sense that the running JVM hasn't loaded them yet — a restart will.
+    started_at_str = state.get("StartedAt") or ""
+    started_ts = 0.0
+    try:
+        from datetime import datetime
+        # docker uses "2026-06-05T01:40:34.445311441Z"; strip the nanoseconds tail
+        s = started_at_str.replace("Z", "+00:00")
+        if "." in s:
+            head, _, tz = s.partition(".")
+            frac, _, tail = tz.partition("+")
+            s = f"{head}.{frac[:6]}+{tail}" if tail else f"{head}.{frac[:6]}"
+        started_ts = datetime.fromisoformat(s).timestamp()
+    except Exception:
+        started_ts = 0.0
+    staged_mem_now = _load_json(_staged_path(rec["id"]), {})
+    pending_installs: list[str] = []
+    if started_ts > 0:
+        for fname, info in (staged_mem_now or {}).items():
+            try:
+                staged_at_v = float(info.get("staged_at") or 0)
+            except Exception:
+                staged_at_v = 0.0
+            if staged_at_v <= started_ts:
+                continue
+            # Only count it as a fresh install if it lives in plugins/ (not update/)
+            if (paths["plugins"] / fname).exists() and fname not in pending_updates:
+                pending_installs.append(fname)
+    pending_installs.sort()
+
     return {
         "server_id": rec["id"],
         "container": rec["container"],
@@ -767,6 +798,7 @@ async def server_status() -> dict:
         "version": version, "build": build,
         "motd": motd, "players": players, "port": port,
         "pending_updates": pending_updates,
+        "pending_installs": pending_installs,
         "pending_deletions": sorted((_load_json(_deletions_path(rec["id"]), {}) or {}).keys()),
     }
 
@@ -2994,6 +3026,136 @@ async def cancel_pending(filename: str) -> dict:
         raise HTTPException(404, "no such pending update")
     path.unlink()
     return {"ok": True, "cancelled": filename}
+
+
+@app.post("/api/server/cancel-all-staged")
+async def cancel_all_staged(payload: dict | None = None) -> dict:
+    """Undo every staged change for the current server in one shot.
+
+    Cancels:
+      - all jars in plugins/update/ (pending plugin updates)
+      - all entries in staged-deletions
+      - all recent fresh-installs (jars in plugins/ added since the container
+        started — undoes the install entirely)
+      - the staged server version/build change (reverts compose env to match
+        the currently-running container's actual env values)
+
+    Pass {"include_installs": false} to keep recent fresh-installs.
+    Pass {"include_server": false} to leave the compose server-version change alone.
+    """
+    payload = payload or {}
+    include_installs = payload.get("include_installs", True)
+    include_server = payload.get("include_server", True)
+
+    rec = _srv()
+    paths = _paths(rec)
+    server_id = rec["id"]
+    result: dict = {
+        "cancelled_updates": [],
+        "cancelled_deletions": [],
+        "cancelled_installs": [],
+        "reverted_server": None,
+        "errors": [],
+    }
+
+    # 1) Pending updates — delete every jar in plugins/update/
+    update_dir = paths["update"]
+    if update_dir.exists():
+        for jar in list(update_dir.glob("*.jar")):
+            try:
+                jar.unlink()
+                result["cancelled_updates"].append(jar.name)
+            except Exception as e:  # noqa: BLE001
+                result["errors"].append(f"update {jar.name}: {e}")
+
+    # 2) Pending deletions — clear the staged-deletions file
+    deletions_path = _deletions_path(server_id)
+    pending_del = _load_json(deletions_path, {})
+    if pending_del:
+        result["cancelled_deletions"] = sorted(pending_del.keys())
+        _save_json(deletions_path, {})
+
+    # 3) Fresh-installs — find every staged-memory entry with staged_at newer
+    #    than container StartedAt and remove the jar from plugins/, then drop
+    #    the staged-memory entry.
+    if include_installs:
+        # Reuse the same StartedAt-vs-staged_at comparison the status endpoint uses.
+        rc, out, err = _sh("docker", "inspect", rec["container"], timeout=5)
+        started_ts = 0.0
+        try:
+            data = json.loads(out)[0]
+            sa = data.get("State", {}).get("StartedAt") or ""
+            from datetime import datetime
+            s = sa.replace("Z", "+00:00")
+            if "." in s:
+                head, _, tz = s.partition(".")
+                frac, _, tail = tz.partition("+")
+                s = f"{head}.{frac[:6]}+{tail}" if tail else f"{head}.{frac[:6]}"
+            started_ts = datetime.fromisoformat(s).timestamp()
+        except Exception:
+            started_ts = 0.0
+        staged_mem = _load_json(_staged_path(server_id), {})
+        keep: dict = {}
+        for fname, info in (staged_mem or {}).items():
+            try:
+                staged_at_v = float(info.get("staged_at") or 0)
+            except Exception:
+                staged_at_v = 0.0
+            if started_ts > 0 and staged_at_v > started_ts:
+                jar = paths["plugins"] / fname
+                if jar.exists() and jar.is_file():
+                    try:
+                        jar.unlink()
+                        result["cancelled_installs"].append(fname)
+                    except Exception as e:  # noqa: BLE001
+                        result["errors"].append(f"install {fname}: {e}")
+                        keep[fname] = info
+                # Drop the staged-memory regardless (jar already gone or removed)
+            else:
+                keep[fname] = info
+        _save_json(_staged_path(server_id), keep)
+
+    # 4) Server version/build change — revert compose env to match the
+    #    container's running env. The container's env is the ground truth for
+    #    "what's actually live"; the compose file is the staging buffer.
+    if include_server:
+        try:
+            rc, out, err = _sh("docker", "inspect", rec["container"], timeout=5)
+            running_env: dict[str, str] = {}
+            if rc == 0:
+                container_info = json.loads(out)[0]
+                for kv in (container_info.get("Config", {}).get("Env") or []):
+                    if "=" in kv:
+                        k, v = kv.split("=", 1)
+                        running_env[k] = v
+            file_env = compose.get_env(paths["compose"])
+            # Compare ONLY the version/build-related keys
+            keys_to_check = [
+                "VERSION", "TYPE", "PAPER_BUILD", "FOLIA_BUILD", "PURPUR_BUILD",
+                "LEAF_BUILD", "PUFFERFISH_BUILD", "MOHIST_BUILD", "LIMBO_BUILD",
+                "CANYON_BUILD", "FORGE_VERSION", "NEOFORGE_VERSION",
+                "FABRIC_LOADER_VERSION", "QUILT_LOADER_VERSION",
+            ]
+            revert: dict[str, str] = {}
+            for k in keys_to_check:
+                in_file = file_env.get(k)
+                in_running = running_env.get(k)
+                if in_file is not None and in_running is not None and in_file != in_running:
+                    revert[k] = in_running
+            if revert:
+                compose.update_env(paths["compose"], revert)
+                result["reverted_server"] = revert
+        except Exception as e:  # noqa: BLE001
+            result["errors"].append(f"server-revert: {e}")
+
+    audit.event(
+        "cancel_all_staged",
+        updates=len(result["cancelled_updates"]),
+        deletions=len(result["cancelled_deletions"]),
+        installs=len(result["cancelled_installs"]),
+        reverted_server=bool(result["reverted_server"]),
+    )
+    return result
 
 
 # --- premium / spigot cookie fallbacks --------------------------------------
