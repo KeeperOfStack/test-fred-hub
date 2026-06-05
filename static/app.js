@@ -1033,26 +1033,33 @@ async function refreshRegistry() {
 
 async function installFromCatalog(key, btn, intent) {
   busy(btn, true, "Staging…");
-  // Optimistic UX: open the post-staging modal immediately so the user gets
-  // instant feedback. Network call runs in parallel.
   const noun = (btn?.closest(".reg-item")?.querySelector("h3")?.textContent || key).trim();
   const modal = openSchedulerPickerAfterStaging({ noun, file: null, pending: true });
+  // Safety net: if the backend hangs or the resolve path silently fails,
+  // never leave the user staring at a grayed-out modal. Auto-close + toast.
+  const timeoutId = setTimeout(() => {
+    if (document.body.contains(modal.modal)) {
+      toast("Install request timed out — closing modal. Check the Plugins tab.", "warn");
+      modal.close();
+      busy(btn, false);
+    }
+  }, 60000);
   try {
     const r = await api(`/api/plugins/install/${encodeURIComponent(key)}`, { method: "POST" });
+    clearTimeout(timeoutId);
     const mode = r.staged ? "Staged" : "Installed";
     toast(`${mode} ${r.file} (${r.source} v${r.version}).`, "ok");
-    refreshRegistry(); refreshPlugins(); refreshServer(); refreshSchedule();
+    // Refresh AFTER resolving the modal so the visual state lands first.
     if (intent && intent.trigger !== "none") {
       intent.note = `${key} install`;
       await submitRestartIntent(intent);
       modal.close();
     } else {
-      // Resolve in BOTH cases. Fresh install goes to plugins/ directly; an
-      // update goes to plugins/update/. The Cancel button needs to know which
-      // endpoint to hit, so pass `staged` through.
       modal.resolve({ noun: r.file.replace(/\.jar$/, ""), file: r.file, staged: !!r.staged });
     }
+    refreshRegistry(); refreshPlugins(); refreshServer(); refreshSchedule();
   } catch (e) {
+    clearTimeout(timeoutId);
     toast("Install failed: " + e.message, "err");
     modal.close();
   } finally {
@@ -1355,17 +1362,26 @@ function renderSearchResults() {
 async function installFromSearch(source, ref, title, btn) {
   busy(btn, true, "Staging…");
   const modal = openSchedulerPickerAfterStaging({ noun: title, file: null, pending: true });
+  const timeoutId = setTimeout(() => {
+    if (document.body.contains(modal.modal)) {
+      toast("Install request timed out — closing modal. Check the Plugins tab.", "warn");
+      modal.close();
+      busy(btn, false);
+    }
+  }, 60000);
   try {
     const r = await api("/api/plugins/install-source", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ source, ref, display: title }),
     });
+    clearTimeout(timeoutId);
     const mode = r.staged ? "Staged" : "Installed";
     toast(`${mode} ${r.file} (${r.source} v${r.version}).`, "ok");
-    refreshPlugins(); refreshRegistry(); refreshServer(); refreshSchedule();
     modal.resolve({ noun: title, file: r.file, staged: !!r.staged });
+    refreshPlugins(); refreshRegistry(); refreshServer(); refreshSchedule();
   } catch (e) {
+    clearTimeout(timeoutId);
     toast("Install failed: " + e.message, "err");
     modal.close();
   } finally { busy(btn, false); }
