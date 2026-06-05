@@ -480,9 +480,43 @@ async def _download_to(url: str, dest: Path, client: httpx.AsyncClient) -> int:
 
 
 def _is_jar(path: Path) -> bool:
+    """Validate that ``path`` is a real plugin JAR.
+
+    Old check only scanned the first 50 zip entries for ``META-INF/`` — which
+    rejected many legitimate plugin jars whose archives list ``categories/``
+    or locales before the manifest, AND rejected several older Spigot plugins
+    (ChestSort, KeepChunks, GravesX, ...) whose authors strip ``META-INF/``
+    from their jars entirely.
+
+    A plugin jar is anything that's a valid zip and contains EITHER:
+      - any ``META-INF/`` entry (the classic JAR signature), OR
+      - a ``plugin.yml`` / ``paper-plugin.yml`` / ``bungee.yml`` / ``velocity-plugin.json``
+        / ``fabric.mod.json`` / ``mods.toml`` (loader manifest), OR
+      - at least one ``.class`` file (bytecode payload — final safety net)
+    Anything else is HTML, JSON error pages, etc. and gets rejected.
+    """
     try:
         with zipfile.ZipFile(path) as z:
-            return any(n.startswith("META-INF/") for n in z.namelist()[:50])
+            names = z.namelist()
+            if not names:
+                return False
+            manifests = {
+                "plugin.yml", "paper-plugin.yml", "bungee.yml",
+                "velocity-plugin.json", "fabric.mod.json",
+            }
+            has_meta = False
+            has_manifest = False
+            has_class = False
+            for n in names:
+                if n.startswith("META-INF/"):
+                    has_meta = True
+                if n in manifests or n.endswith("/mods.toml") or n == "mods.toml":
+                    has_manifest = True
+                if n.endswith(".class"):
+                    has_class = True
+                if has_meta or has_manifest or has_class:
+                    return True
+            return False
     except Exception:
         return False
 
@@ -2556,10 +2590,43 @@ async def install_from_registry(key: str, immediate: bool = False) -> dict:
     version, _ = _server_version_build(rec, paths)
     if not version:
         raise HTTPException(500, "no paper jar found")
+
+    # Build the source list to try, then append automatic fallbacks so the
+    # install path stays airtight even when an upstream source rots. The
+    # display name is searched on Modrinth/Hangar/Spiget so a Spigot resource
+    # that flipped to "external link" doesn't dead-end the user.
+    sources: list[tuple[str, str]] = [
+        tuple(s) for s in (entry_def.get("sources") or [])
+    ]
+    display = entry_def.get("display") or key
+    # Don't duplicate refs already in the curated list.
+    seen_refs = {(s, r) for s, r in sources}
+    for src, ref in [
+        ("modrinth", key),
+        ("modrinth", display.lower().replace(" ", "-")),
+        ("modrinth", _search_modrinth_),  # sentinel — search by display name
+        ("hangar", _search_hangar_),
+    ]:
+        if isinstance(ref, str) and (src, ref) not in seen_refs:
+            sources.append((src, ref))
+            seen_refs.add((src, ref))
+        elif callable(ref):
+            sources.append((src, ref))
+
+    last_errors: list[str] = []
     async with _client() as c:
-        for source, ref in (tuple(s) for s in entry_def["sources"]):
-            resolved = await resolvers.resolve_source(c, source, ref, version)
+        for source, ref in sources:
+            try:
+                # Sentinels are functions that perform a name-based search
+                if callable(ref):
+                    resolved = await ref(c, display, version)
+                else:
+                    resolved = await resolvers.resolve_source(c, source, ref, version)
+            except Exception as e:
+                last_errors.append(f"{source}:{ref!r}: {type(e).__name__}")
+                continue
             if not resolved:
+                last_errors.append(f"{source}:{ref}: no match")
                 continue
             filename = resolved.filename or f"{entry_def['display']}.jar"
             filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename)
@@ -2580,23 +2647,41 @@ async def install_from_registry(key: str, immediate: bool = False) -> dict:
                 staged = False
             try:
                 size = await _download_to(resolved.download_url, dest, c)
-            except HTTPException:
+            except HTTPException as e:
+                last_errors.append(f"{source}:{ref}: dl {e.detail}")
+                continue
+            except Exception as e:
+                last_errors.append(f"{source}:{ref}: dl {type(e).__name__}")
                 continue
             if not _is_jar(dest):
                 dest.unlink(missing_ok=True)
+                last_errors.append(f"{source}:{ref}: not a jar")
                 continue
             # Record staged-memory for BOTH paths so the UI's "pending" /
             # "recently added" lists pick up new installs too. The staged-memory
             # is purely a UI hint — it doesn't change where the jar lives.
             _record_staged(rec["id"], filename, resolved.version, f"catalog:{key}")
             audit.event("plugin_install_ok", file=filename, source=resolved.source,
-                        version=resolved.version, staged=staged, is_update=is_update, key=key)
+                        version=resolved.version, staged=staged, is_update=is_update,
+                        key=key, matched_via=resolved.matched_via)
             return {"ok": True, "key": key, "source": resolved.source,
                     "version": resolved.version, "file": filename, "size": size,
                     "staged": staged, "is_update": is_update,
+                    "matched_via": resolved.matched_via,
                     "note": ("update staged in plugins/update/ — restart to apply"
                              if staged else "installed to plugins/ — loads on next restart")}
-    raise HTTPException(502, f"all sources failed for {key}")
+    audit.event("plugin_install_fail", key=key, errors=last_errors[:10])
+    raise HTTPException(502, f"all sources failed for {key}: " + "; ".join(last_errors[:4]))
+
+
+async def _search_modrinth_(client: httpx.AsyncClient, display: str, mc_version: str):
+    """Last-resort fallback: search Modrinth for the plugin by display name."""
+    return await resolvers.resolve_modrinth_search(client, display, mc_version)
+
+
+async def _search_hangar_(client: httpx.AsyncClient, display: str, mc_version: str):
+    """Last-resort fallback: search Hangar for the plugin by display name."""
+    return await resolvers.resolve_hangar(client, display, mc_version)
 
 
 def _record_staged(server_id: str, filename: str, version: str | None, source: str) -> None:

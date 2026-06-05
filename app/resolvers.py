@@ -68,28 +68,46 @@ async def modrinth_latest_for_mc(
     mc_version: str,
     allow_any_loader: bool = False,
 ) -> dict | None:
-    params: dict[str, Any] = {
-        "loaders": json.dumps(PAPER_LOADERS),
-        "game_versions": json.dumps([mc_version]),
-    }
-    r = await client.get(
-        f"{MODRINTH_API}/project/{slug_or_id}/version", params=params
-    )
-    if r.status_code != 200:
-        return None
-    versions = r.json()
-    if versions:
-        return versions[0]
-    if not allow_any_loader:
-        return None
-    # last-ditch: drop loader filter
-    r = await client.get(
-        f"{MODRINTH_API}/project/{slug_or_id}/version",
-        params={"game_versions": json.dumps([mc_version])},
-    )
-    if r.status_code == 200:
-        v = r.json()
-        return v[0] if v else None
+    """Find the latest Modrinth version compatible with ``mc_version``.
+
+    Tries progressively looser filters so we don't need hand-curated sources:
+      1. exact mc_version + paper-family loaders
+      2. exact mc_version, any loader
+      3. same major.minor family (e.g. any 1.21.*) + paper-family loaders
+      4. same major.minor family, any loader
+      5. absolute fallback: latest version of the project, ignore MC entirely
+    """
+    async def _try(params: dict[str, Any]) -> list[dict] | None:
+        r = await client.get(
+            f"{MODRINTH_API}/project/{slug_or_id}/version", params=params
+        )
+        return r.json() if r.status_code == 200 else None
+
+    # Build the candidate game-version sets
+    base = ".".join(mc_version.split(".")[:2]) if mc_version else ""
+    family = []
+    if base:
+        # 1.21.0 .. 1.21.20 — we don't know how far out projects go, scan generously
+        family = [base] + [f"{base}.{i}" for i in range(0, 21)]
+
+    paper = json.dumps(PAPER_LOADERS)
+
+    attempts: list[dict[str, Any]] = []
+    if mc_version:
+        attempts.append({"loaders": paper, "game_versions": json.dumps([mc_version])})
+        if allow_any_loader:
+            attempts.append({"game_versions": json.dumps([mc_version])})
+    if family:
+        attempts.append({"loaders": paper, "game_versions": json.dumps(family)})
+        if allow_any_loader:
+            attempts.append({"game_versions": json.dumps(family)})
+    # Absolute last resort — no filters; pick the latest published version.
+    attempts.append({})
+
+    for params in attempts:
+        versions = await _try(params)
+        if versions:
+            return versions[0]
     return None
 
 
@@ -289,16 +307,36 @@ async def resolve_spiget(
 
     if fileinfo.get("type") == "external":
         ext = fileinfo.get("externalUrl") or ""
-        # only honor external links that look like direct jar downloads
-        if ext.endswith(".jar") or "/releases/download/" in ext or "/artifact/" in ext:
+        # Accept anything the downloader can pivot to a real jar:
+        #   - direct .jar URLs
+        #   - GitHub /releases/download/ asset URLs
+        #   - GitHub /releases/tag/ pages (downloader pivots via GitHub API)
+        #   - GitHub /releases/expanded_assets/ pages (same pivot)
+        #   - Jenkins /artifact/ URLs
+        usable = (
+            ext.endswith(".jar")
+            or "/releases/download/" in ext
+            or "/releases/tag/" in ext
+            or "/releases/expanded_assets/" in ext
+            or "/artifact/" in ext
+        )
+        if usable:
             url = ext
             filename = ext.rsplit("/", 1)[-1] if "/" in ext else None
+            # Don't lie about the filename when the URL is a tag page — let the
+            # downloader's content-disposition / pivot pick the real name.
+            if not (filename and filename.endswith(".jar")):
+                filename = f"{data.get('name', 'plugin')}.jar"
         else:
-            return None  # patreon/hangar HTML/etc — can't use
+            # Unusable external (Patreon, Discord, project homepage, etc.).
+            # Fall back to a name-search on Modrinth/Hangar so the catalog
+            # entry still resolves automatically without manual curation.
+            return await _spiget_external_fallback(
+                client, data, mc_version, ext
+            )
     else:
         # The Spiget direct-download endpoint returns the actual file ONLY for
-        # non-premium, non-external resources. For premium it returns a JSON
-        # error or HTML; the caller's content-type check catches that.
+        # non-premium, non-external resources.
         url = f"https://api.spiget.org/v2/resources/{rid}/download"
         filename = f"{data.get('name', 'plugin')}.jar"
 
@@ -313,6 +351,44 @@ async def resolve_spiget(
         description=(data.get("tag") or "").strip() or None,
         matched_via="registry",
     )
+
+
+async def _spiget_external_fallback(
+    client: httpx.AsyncClient, spiget_data: dict, mc_version: str, ext_url: str
+) -> ResolvedVersion | None:
+    """Spiget resource with an unusable external link (Patreon, Discord, HTML
+    homepage). Try to find the SAME plugin on Modrinth or Hangar by name so
+    the install still works without hand-curating the catalog.
+    """
+    name = (spiget_data.get("name") or "").strip()
+    if not name:
+        return None
+    # Strip common suffixes that confuse search ("Plugin", parens, etc.)
+    cleaned = re.sub(r"\(.*?\)", "", name).strip()
+    cleaned = re.sub(r"\s+(plugin|community edition|reloaded|continued)$", "",
+                     cleaned, flags=re.I).strip()
+    candidate = cleaned or name
+    # Try Modrinth slug derived from the name first (cheap; works most of the time)
+    slug = re.sub(r"[^a-z0-9]+", "-", candidate.lower()).strip("-")
+    if slug:
+        hit = await resolve_modrinth(client, slug, mc_version)
+        if hit:
+            hit.matched_via = "spiget-external-fallback"
+            return hit
+    # Then Modrinth full-text search
+    hit = await resolve_modrinth_search(client, candidate, mc_version)
+    if hit:
+        hit.matched_via = "spiget-external-fallback"
+        return hit
+    # Last try: Hangar
+    try:
+        hit = await resolve_hangar(client, candidate, mc_version)
+        if hit:
+            hit.matched_via = "spiget-external-fallback"
+            return hit
+    except Exception:
+        pass
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
