@@ -1033,28 +1033,29 @@ async function refreshRegistry() {
 
 async function installFromCatalog(key, btn, intent) {
   busy(btn, true, "Staging…");
-  // Optimistic UX: open the post-staging modal immediately (with a "Working…"
-  // state) so the user gets instant feedback. Network call runs in parallel.
+  // Optimistic UX: open the post-staging modal immediately so the user gets
+  // instant feedback. Network call runs in parallel.
   const noun = (btn?.closest(".reg-item")?.querySelector("h3")?.textContent || key).trim();
   const modal = openSchedulerPickerAfterStaging({ noun, file: null, pending: true });
   try {
     const r = await api(`/api/plugins/install/${encodeURIComponent(key)}`, { method: "POST" });
     const mode = r.staged ? "Staged" : "Installed";
     toast(`${mode} ${r.file} (${r.source} v${r.version}).`, "ok");
-    // Fire-and-forget refreshes (don't block the modal)
     refreshRegistry(); refreshPlugins(); refreshServer(); refreshSchedule();
     if (intent && intent.trigger !== "none") {
       intent.note = `${key} install`;
       await submitRestartIntent(intent);
       modal.close();
-    } else if (r.staged) {
-      modal.resolve({ noun: r.file.replace(/\.jar$/, ""), file: r.file });
     } else {
-      modal.close();
+      // Resolve in BOTH cases. Fresh install goes to plugins/ directly; an
+      // update goes to plugins/update/. The Cancel button needs to know which
+      // endpoint to hit, so pass `staged` through.
+      modal.resolve({ noun: r.file.replace(/\.jar$/, ""), file: r.file, staged: !!r.staged });
     }
   } catch (e) {
     toast("Install failed: " + e.message, "err");
     modal.close();
+  } finally {
     busy(btn, false);
   }
 }
@@ -1353,7 +1354,6 @@ function renderSearchResults() {
 
 async function installFromSearch(source, ref, title, btn) {
   busy(btn, true, "Staging…");
-  // Open modal optimistically. Same UX as catalog install.
   const modal = openSchedulerPickerAfterStaging({ noun: title, file: null, pending: true });
   try {
     const r = await api("/api/plugins/install-source", {
@@ -1364,11 +1364,7 @@ async function installFromSearch(source, ref, title, btn) {
     const mode = r.staged ? "Staged" : "Installed";
     toast(`${mode} ${r.file} (${r.source} v${r.version}).`, "ok");
     refreshPlugins(); refreshRegistry(); refreshServer(); refreshSchedule();
-    if (r.staged) {
-      modal.resolve({ noun: title, file: r.file });
-    } else {
-      modal.close();
-    }
+    modal.resolve({ noun: title, file: r.file, staged: !!r.staged });
   } catch (e) {
     toast("Install failed: " + e.message, "err");
     modal.close();
@@ -1376,16 +1372,19 @@ async function installFromSearch(source, ref, title, btn) {
 }
 
 // Shared post-staging picker — used by installFromCatalog, installFromSearch,
-// and the manual upload modal's "what next?" flow. Opens a small modal with
-// the restart-options picker and three buttons:
-//   • Cancel (remove staged jar)    → unstage + close
-//   • Done (leave queued for later) → close, jar stays in plugins/update/
-//   • Confirm (with picker intent)  → submit restart schedule
+// and the manual upload modal's "what next?" flow. Two buttons:
+//   • Cancel (remove the jar)      → DELETE the staged or installed jar + close
+//   • Confirm                       → if picker.trigger === "none", just close
+//                                     (jar stays in place); else submit restart
 //
-// Returns { close(), resolve({noun,file}) } so the caller can open the modal
-// optimistically (pending state) and then fill in the staged-file details
-// once the backend confirms.
-function openSchedulerPickerAfterStaging({ noun, file, pending = false }) {
+// Caller flow:
+//   const modal = openSchedulerPickerAfterStaging({ noun, file: null, pending: true });
+//   // … await backend …
+//   modal.resolve({ noun, file, staged });    // staged=true → jar in plugins/update/
+//                                              // staged=false → jar in plugins/ (fresh install)
+//
+// Returns { close(), resolve({noun,file,staged}), modal }.
+function openSchedulerPickerAfterStaging({ noun, file, staged = true, pending = false }) {
   const showScope = !!(lastServer && lastServer.pending_restart);
   const picker = buildRestartPicker({
     showScope,
@@ -1396,48 +1395,55 @@ function openSchedulerPickerAfterStaging({ noun, file, pending = false }) {
   modal.className = "modal-overlay";
   modal.innerHTML = `
     <div class="modal-box" style="max-width:560px">
-      <h2 id="rp-title">${pending ? "⏳" : "✅"} ${noun} ${pending ? "staging…" : "staged"}</h2>
+      <h2 id="rp-title">${pending ? "⏳" : "✅"} ${noun} ${pending ? "installing…" : "installed"}</h2>
       <p class="hint" id="rp-sub" style="margin:0 0 10px;text-align:left">
-        ${pending
-          ? `<em>Working on it…</em>`
-          : `<code id="rp-file">${file || ""}</code> is sitting in <code>plugins/update/</code>. It will load on the next restart.<br>Pick a restart schedule below, or click <b>Done</b> to leave it queued for later.`}
+        <em>Working on it…</em>
       </p>
       <div id="rp-mount" style="${pending ? "opacity:0.45;pointer-events:none" : ""}"></div>
       <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;flex-wrap:wrap">
-        <button class="mc-btn" id="rp-cancel" style="background:linear-gradient(180deg,#dc2626 0%,#7f1d1d 100%)" ${pending ? "disabled" : ""}>Cancel (remove staged jar)</button>
-        <button class="mc-btn" id="rp-done" style="background:linear-gradient(180deg,#6b7280 0%,#374151 100%)" ${pending ? "disabled" : ""}>Done — leave queued</button>
+        <button class="mc-btn" id="rp-cancel" style="background:linear-gradient(180deg,#dc2626 0%,#7f1d1d 100%)" ${pending ? "disabled" : ""}>Cancel (remove jar)</button>
         <button class="mc-btn mc-btn-warn" id="rp-submit" ${pending ? "disabled" : ""}>Confirm</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
   modal.querySelector("#rp-mount").appendChild(picker.node);
 
+  // Store state on the modal node so the click handlers always read fresh values
+  // after .resolve() updates them.
+  modal.dataset.noun = noun;
+  if (file) modal.dataset.file = file;
+  modal.dataset.staged = String(staged);
+
   const close = () => modal.remove();
 
   modal.querySelector("#rp-cancel").addEventListener("click", async () => {
     const fileNow = modal.dataset.file;
+    const stagedNow = modal.dataset.staged === "true";
+    const nounNow = modal.dataset.noun || noun;
     if (!fileNow) { close(); return; }
+    // Staged jars live in plugins/update/ → use the staged-install delete route.
+    // Fresh-install jars live in plugins/ → use the plugin delete route.
+    const url = stagedNow
+      ? `/api/plugins/${encodeURIComponent(fileNow)}/staged-install`
+      : `/api/plugins/${encodeURIComponent(fileNow)}`;
     try {
-      await api(`/api/plugins/${encodeURIComponent(fileNow)}/staged-install`, { method: "DELETE" });
-      toast(`${modal.dataset.noun || noun} cancelled — staged jar removed.`, "ok");
+      await api(url, { method: "DELETE" });
+      toast(`${nounNow} cancelled — jar removed.`, "ok");
     } catch (e) {
-      toast(`Could not remove staged jar: ${e.message}`, "err");
+      toast(`Could not remove jar: ${e.message}`, "err");
     }
     Promise.all([refreshPlugins(), refreshRegistry(), refreshServer(), refreshSchedule()]);
-    close();
-  });
-
-  modal.querySelector("#rp-done").addEventListener("click", () => {
-    toast(`${modal.dataset.noun || noun} left in the update queue. Restart from the Updates tab when ready.`, "ok");
     close();
   });
 
   modal.querySelector("#rp-submit").addEventListener("click", async () => {
     const intent = picker.getIntent();
     if (!intent) return;
-    intent.note = `${modal.dataset.noun || noun} staged`;
+    const nounNow = modal.dataset.noun || noun;
+    intent.note = `${nounNow} install`;
     if (intent.trigger === "none") {
-      toast(`${modal.dataset.noun || noun} stays in queue. Restart from Updates tab when ready.`, "ok");
+      // No restart scheduled — confirm just means "leave it in place".
+      toast(`${nounNow} ready. Will load on next restart.`, "ok");
       close();
       return;
     }
@@ -1445,26 +1451,28 @@ function openSchedulerPickerAfterStaging({ noun, file, pending = false }) {
     if (r) close();
   });
 
-  // Caller fills these in via .resolve() once backend confirms.
-  modal.dataset.noun = noun;
-  if (file) modal.dataset.file = file;
-
-  // Resolve: switch from pending to ready state with real filename.
-  const resolve = ({ noun: realNoun, file: realFile }) => {
+  // Resolve: switch from pending to ready state with real filename / location.
+  const resolve = ({ noun: realNoun, file: realFile, staged: realStaged }) => {
     modal.dataset.noun = realNoun;
     modal.dataset.file = realFile;
-    modal.querySelector("#rp-title").innerHTML = `✅ ${realNoun} staged`;
+    modal.dataset.staged = String(!!realStaged);
+    const where = realStaged
+      ? `Staged in <code>plugins/update/</code>. Paper will swap it in on the next restart.`
+      : `Installed in <code>plugins/</code>. New plugin will load on next restart.`;
+    modal.querySelector("#rp-title").innerHTML = `✅ ${realNoun} ${realStaged ? "staged" : "installed"}`;
     modal.querySelector("#rp-sub").innerHTML =
-      `<code>${realFile}</code> is sitting in <code>plugins/update/</code>. It will load on the next restart.<br>Pick a restart schedule below, or click <b>Done</b> to leave it queued for later.`;
+      `<code>${realFile}</code> — ${where}<br>Pick a restart schedule below, or just click <b>Confirm</b> to leave it queued for later.`;
     const mount = modal.querySelector("#rp-mount");
     mount.style.opacity = "";
     mount.style.pointerEvents = "";
     for (const b of modal.querySelectorAll("button")) b.disabled = false;
   };
 
+  // Non-pending caller already has everything — set initial sub-text now.
   if (!pending && file) {
-    // Caller already knows everything — nothing else to do.
+    resolve({ noun, file, staged });
   }
+
   return { close, resolve, modal };
 }
 
