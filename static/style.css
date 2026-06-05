@@ -604,9 +604,9 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 14px 18px;
-  margin-bottom: 18px;
-  padding: 14px 16px;
-  background: rgba(0,0,0,0.22);
+  margin-bottom: 22px;
+  padding: 20px 18px 16px;
+  background: linear-gradient(180deg, rgba(0,0,0,0.32), rgba(0,0,0,0.18));
   border: 2px solid var(--panel-border);
   border-radius: 4px;
   position: relative;
@@ -614,13 +614,34 @@ body {
 .tab-server .config-grid::before {
   content: attr(data-section);
   position: absolute;
-  top: -10px; left: 14px;
+  top: -12px; left: 14px;
   background: var(--panel-bg);
-  padding: 0 8px;
+  padding: 2px 10px;
   font-family: "Press Start 2P", monospace;
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 1.5px;
   color: var(--gold);
+  border: 2px solid var(--panel-border);
+  border-radius: 2px;
+}
+.tab-server .config-field {
+  padding: 8px 10px;
+  background: rgba(0,0,0,0.18);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 3px;
+  gap: 6px;
+}
+.tab-server .config-field > span:first-child {
+  font-size: 11px;
+}
+/* Save button row sits inside its own panel for clarity */
+.tab-server .btn-row {
+  margin: 8px 0 22px;
+  padding: 14px 16px;
+  background: linear-gradient(180deg, rgba(46,204,106,0.12), rgba(46,204,106,0.04));
+  border: 2px solid var(--emerald-d);
+  border-radius: 4px;
+  justify-content: flex-end;
 }
 .config-grid {
   display: grid;
@@ -1003,16 +1024,17 @@ body {
 }
 .cat-src-rm:hover { background: var(--redstone-d); }
 .catalog-edit-btn, .catalog-remove-btn {
-  background: var(--dirt-2);
-  color: var(--gold);
-  border: 1px solid var(--panel-border);
-  border-radius: 3px;
-  padding: 4px 8px;
-  font-size: 12px;
-  cursor: pointer;
+  font-size: 11px;
+  padding: 4px 10px;
+  letter-spacing: 0.5px;
 }
-.catalog-remove-btn { background: var(--redstone-d); color: #fff; }
-.catalog-edit-btn:hover { filter: brightness(1.15); }
+.catalog-edit-btn {
+  background: linear-gradient(180deg, #6b7280 0%, #374151 100%);
+}
+.catalog-remove-btn {
+  background: linear-gradient(180deg, #dc2626 0%, #7f1d1d 100%);
+}
+.catalog-edit-btn:hover,
 .catalog-remove-btn:hover { filter: brightness(1.15); }
 
 /* ── Premium plugins ──────────────────────────────────────────────── */

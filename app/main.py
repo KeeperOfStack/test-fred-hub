@@ -755,6 +755,81 @@ async def _get_player_count(server_id: str) -> int | None:
         return None
 
 
+async def _recurring_stage_all_plugin_updates(server_id: str, paths: dict) -> dict:
+    """Pre-flight for recurring restarts when include_plugin_updates is set.
+
+    Walks every plugin jar, asks each resolver for a newer version, and stages
+    everything that has an update into plugins/update/ so the upcoming restart
+    actually applies them. Returns a small summary dict for the audit log.
+
+    Reuses the same logic as POST /api/plugins/check + /api/plugins/stage-all
+    but without going through HTTP. Errors per-plugin are caught — we never
+    block the restart over one bad lookup.
+    """
+    rec = servers.get(server_id)
+    if not rec:
+        return {"checked": 0, "staged": 0, "failed": 0, "reason": "server gone"}
+    version, _ = _server_version_build(rec, paths)
+    if not version:
+        return {"checked": 0, "staged": 0, "failed": 0, "reason": "no server jar"}
+    staged_mem = _load_json(_staged_path(server_id), {})
+    cat_data = _get_server_catalog(server_id)
+    update_dir = paths["update"]
+    results = []
+    async with _client() as c:
+        jars = sorted(paths["plugins"].glob("*.jar"))
+        infos = [_parse_plugin_jar(j) for j in jars]
+        tasks = [_resolve_for_plugin(c, info, version, catalog=cat_data) for info in infos]
+        for fut in asyncio.as_completed(tasks):
+            entry = await fut
+            _apply_staged_memory(entry, staged_mem, update_dir)
+            results.append(entry)
+    _save_json(_cache_path(server_id),
+               {"checked_at": time.time(), "mc_version": version, "results": results})
+    # Stage every result that has an update available and isn't already staged.
+    # Inline (server-id aware) version of POST /api/plugins/{file}/stage-update
+    # — the HTTP handler reads server-id from active session and we're firing
+    # from a background scheduler tick with no session context.
+    staged_now, failed = [], []
+    paths["update"].mkdir(parents=True, exist_ok=True)
+    async with _client() as c:
+        for r in results:
+            if not r.get("update_available"):
+                continue
+            if r["file"] in staged_mem:
+                continue  # already staged from a previous run
+            if not r.get("download_url"):
+                failed.append({"file": r["file"], "error": "no download URL"})
+                continue
+            new_name = r.get("filename") or r["file"]
+            new_name = re.sub(r"[^A-Za-z0-9._-]+", "_", new_name)
+            if not new_name.endswith(".jar"):
+                new_name += ".jar"
+            dest = paths["update"] / new_name
+            try:
+                await _download_to(r["download_url"], dest, c)
+                if not _is_jar(dest):
+                    dest.unlink(missing_ok=True)
+                    failed.append({"file": r["file"], "error": "downloaded file is not a valid jar"})
+                    continue
+                staged_mem[r["file"]] = {
+                    "staged_version": r.get("latest_version"),
+                    "staged_filename": new_name,
+                    "source": r.get("source"),
+                    "staged_at": time.time(),
+                }
+                staged_now.append(r["file"])
+            except Exception as e:  # noqa: BLE001
+                failed.append({"file": r["file"], "error": str(e)[:200]})
+    _save_json(_staged_path(server_id), staged_mem)
+    audit.event(
+        "recurring_plugin_stage_done", server=server_id,
+        checked=len(results), staged=len(staged_now), failed=len(failed),
+    )
+    return {"checked": len(results), "staged": len(staged_now),
+            "failed": len(failed), "files": staged_now}
+
+
 async def _fire_scheduled_restart(server_id: str, intent) -> dict:
     """Scheduler callback — handles BOTH RestartIntent and RecurringSchedule.
 
@@ -778,6 +853,14 @@ async def _fire_scheduled_restart(server_id: str, intent) -> dict:
         note=intent.note,
         include_server_updates=getattr(intent, "include_server_updates", False),
     )
+    # Recurring with include_plugin_updates → check + stage all plugin
+    # updates before the restart fires, so the restart actually applies them.
+    plugin_stage_summary = None
+    if is_recurring and getattr(intent, "include_plugin_updates", False):
+        try:
+            plugin_stage_summary = await _recurring_stage_all_plugin_updates(server_id, paths)
+        except Exception as e:  # noqa: BLE001
+            audit.event("recurring_plugin_stage_failed", server=server_id, error=str(e)[:200])
     # Recurring with include_server_updates and scope=server → first check
     # whether a newer Paper build exists; if so, bump compose env.
     bumped_to = None
@@ -1010,6 +1093,7 @@ def _coerce_recurring(payload: dict) -> sched_mod.RecurringSchedule:
         day_of_month=dom,
         scope=scope,
         include_server_updates=bool(payload.get("include_server_updates")),
+        include_plugin_updates=bool(payload.get("include_plugin_updates")),
         max_players=max_players,
         enabled=bool(payload.get("enabled", True)),
         note=str(payload.get("note") or "")[:200],

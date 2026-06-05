@@ -67,6 +67,7 @@ class RecurringSchedule:
     day_of_month: Optional[int] = None # 1..31 (clamped to last day of month), required for monthly
     scope: str = "plugins"             # "plugins" | "server"
     include_server_updates: bool = False  # if scope=="server", auto-check & apply Paper updates
+    include_plugin_updates: bool = False  # check + stage all plugin updates BEFORE firing
     max_players: int = 0               # gate: only fire when player count <= this
     enabled: bool = True
     created_at: float = 0.0
