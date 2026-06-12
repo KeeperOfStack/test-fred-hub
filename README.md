@@ -77,7 +77,7 @@ By default, this repository is licensed under the **GNU Affero General Public Li
 ### 2. Commercial Licensing
 If you or your company wish to use this software in a proprietary, closed-source environment (or within a system where you cannot comply with the AGPLv3 open-source requirements), you must obtain a commercial exception license.
 
-To inquire about purchasing a commercial license, please **[open a new GitHub Issue here](../issues/new?title=Commercial+License+Inquiry)** using the title "Commercial License Inquiry."
+To inquire about purchasing a commercial license, please **[open a new GitHub Issue here](./issues/new?title=Commercial+License+Inquiry)** using the title "Commercial License Inquiry."
 
 ## Acknowledgements
 
